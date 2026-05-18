@@ -16,7 +16,11 @@ from greynoc_detector_engine.ingest.github import GitHubIngestor
 from greynoc_detector_engine.ingest.kev import KEVIngestor
 from greynoc_detector_engine.ingest.news import NewsIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
-from greynoc_detector_engine.models.detection import DetectionStatus, ValidationEvidence
+from greynoc_detector_engine.models.detection import (
+    DetectionStatus,
+    ValidationEvidence,
+    ValidationResult,
+)
 from greynoc_detector_engine.models.source import (
     SourceConfig,
     SourceRun,
@@ -32,6 +36,10 @@ from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.utils.time import utc_now
 
 IngestSourceName = Literal["cve", "kev", "news", "rss", "github"]
+
+
+class DetectionLifecycleError(ValueError):
+    pass
 
 
 class JobResult(BaseModel):
@@ -255,6 +263,11 @@ def update_detection_status(
     if detection is None:
         return JobResult(job="update-detection-status", status="not_found", messages=[detection_id])
 
+    evidence_items = [*detection.validation_evidence]
+    if evidence:
+        evidence_items.append(evidence)
+    _validate_detection_transition(status, note=note, evidence_items=evidence_items)
+
     updated = detection.model_copy(update={"status": status}, deep=True)
     if note:
         updated.validation_steps = [*updated.validation_steps, note]
@@ -268,6 +281,36 @@ def update_detection_status(
         + ([note] if note else [])
         + ([evidence.summary] if evidence else []),
     )
+
+
+def _validate_detection_transition(
+    status: DetectionStatus,
+    *,
+    note: str | None,
+    evidence_items: list[ValidationEvidence],
+) -> None:
+    if status == DetectionStatus.VALIDATED:
+        passed_evidence = [item for item in evidence_items if item.result == ValidationResult.PASSED]
+        if not passed_evidence:
+            raise DetectionLifecycleError(
+                "Validated detections require at least one passed validation evidence item."
+            )
+        if not any(item.telemetry_source for item in passed_evidence):
+            raise DetectionLifecycleError(
+                "Validated detections require validation evidence with a telemetry source."
+            )
+        if not any(item.reviewer for item in passed_evidence):
+            raise DetectionLifecycleError(
+                "Validated detections require validation evidence with a reviewer."
+            )
+        if not any(item.sample_size is not None and item.sample_size > 0 for item in passed_evidence):
+            raise DetectionLifecycleError(
+                "Validated detections require validation evidence with a positive sample size."
+            )
+        return
+
+    if status == DetectionStatus.DEPRECATED and not note and not evidence_items:
+        raise DetectionLifecycleError("Deprecated detections require a note or validation evidence.")
 
 
 def generate_detections_for_all(storage: StorageBackend) -> JobResult:
