@@ -15,13 +15,14 @@ from greynoc_detector_engine.ingest.github import GitHubIngestor
 from greynoc_detector_engine.ingest.kev import KEVIngestor
 from greynoc_detector_engine.ingest.news import NewsIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
-from greynoc_detector_engine.models.source import SourceConfig, SourceType
+from greynoc_detector_engine.models.source import SourceConfig, SourceRun, SourceRunStatus, SourceType
 from greynoc_detector_engine.models.threat import ThreatSeverity
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
 from greynoc_detector_engine.scoring.exploitability import ExploitabilityScorer
 from greynoc_detector_engine.scoring.risk import RiskScorer
 from greynoc_detector_engine.storage.base import StorageBackend
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
+from greynoc_detector_engine.utils.time import utc_now
 
 IngestSourceName = Literal["cve", "kev", "news", "rss", "github"]
 
@@ -64,38 +65,87 @@ def run_ingest_job(
     result = JobResult(job=f"ingest:{source}", counts={"records": 0})
 
     for config in configs:
-        if source == "cve":
-            cve_records = CVEIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for cve_record in cve_records:
-                storage.upsert_cve(cve_record)
-            result.counts["records"] += len(cve_records)
-        elif source == "kev":
-            kev_records = KEVIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for kev_record in kev_records:
-                storage.upsert_kev(kev_record)
-            result.counts["records"] += len(kev_records)
-        elif source == "news":
-            source_items = NewsIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        elif source == "rss":
-            source_items = RSSIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        elif source == "github":
-            source_items = GitHubIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        storage.record_source_run(config.source_id, result.status, f"Ingested {config.source_id}.")
+        started_at = utc_now()
+        item_count = 0
+        try:
+            item_count = _ingest_config(
+                source=source,
+                config=config,
+                settings=settings,
+                storage=storage,
+                fixture_path=fixture_path,
+            )
+        except Exception as exc:
+            ended_at = utc_now()
+            storage.record_source_run(
+                SourceRun(
+                    source_id=config.source_id,
+                    status=SourceRunStatus.FAILED,
+                    message=f"Failed to ingest {config.source_id}.",
+                    item_count=item_count,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    error_message=str(exc),
+                )
+            )
+            result.status = "failed"
+            result.messages.append(f"Failed to ingest {config.source_id}: {exc}")
+            raise
+
+        ended_at = utc_now()
+        storage.record_source_run(
+            SourceRun(
+                source_id=config.source_id,
+                status=SourceRunStatus.OK,
+                message=f"Ingested {config.source_id}.",
+                item_count=item_count,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+        )
+        result.counts["records"] += item_count
         result.messages.append(f"Ingested {config.source_id}.")
 
     if not configs:
         result.status = "skipped"
         result.messages.append(f"No enabled sources configured for {source}.")
     return result
+
+
+def _ingest_config(
+    *,
+    source: IngestSourceName,
+    config: SourceConfig,
+    settings: Settings,
+    storage: StorageBackend,
+    fixture_path: Path | None,
+) -> int:
+    if source == "cve":
+        cve_records = CVEIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for cve_record in cve_records:
+            storage.upsert_cve(cve_record)
+        return len(cve_records)
+    if source == "kev":
+        kev_records = KEVIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for kev_record in kev_records:
+            storage.upsert_kev(kev_record)
+        return len(kev_records)
+    if source == "news":
+        source_items = NewsIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "rss":
+        source_items = RSSIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "github":
+        source_items = GitHubIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    return 0
 
 
 def run_correlation_job(storage: StorageBackend) -> JobResult:
