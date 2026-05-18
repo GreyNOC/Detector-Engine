@@ -6,7 +6,7 @@ from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.detection import GeneratedDetection
 from greynoc_detector_engine.models.kev import KEVRecord
 from greynoc_detector_engine.models.scoring import ScoreResult
-from greynoc_detector_engine.models.source import SourceItem
+from greynoc_detector_engine.models.source import SourceItem, SourceRun
 from greynoc_detector_engine.models.threat import ThreatRecord
 
 
@@ -41,6 +41,8 @@ class StorageBackend(Protocol):
 
     def get_detection(self, detection_id: str) -> GeneratedDetection | None: ...
 
-    def record_source_run(self, source_id: str, status: str, message: str) -> None: ...
+    def record_source_run(self, run: SourceRun) -> SourceRun: ...
+
+    def list_source_runs(self, limit: int = 100) -> list[SourceRun]: ...
 
     def record_score_event(self, target_id: str, score_type: str, score: ScoreResult) -> None: ...
