@@ -10,6 +10,7 @@ from greynoc_detector_engine.catalog.threat_library import ThreatLibrary
 from greynoc_detector_engine.config.settings import Settings, load_source_registry
 from greynoc_detector_engine.config.source_registry import SourceRegistry
 from greynoc_detector_engine.detection.generators import DetectionGeneratorSuite
+from greynoc_detector_engine.enrichment.epss import EPSSClient, enrich_cves_with_epss
 from greynoc_detector_engine.ingest.cve import CVEIngestor
 from greynoc_detector_engine.ingest.github import GitHubIngestor
 from greynoc_detector_engine.ingest.kev import KEVIngestor
@@ -167,6 +168,26 @@ def run_correlation_job(storage: StorageBackend) -> JobResult:
         job="correlate",
         counts={"threats": len(report.threats), "relationships": len(report.relationships)},
         messages=[relationship.reason for relationship in report.relationships[:10]],
+    )
+
+
+def run_epss_enrichment_job(
+    *,
+    settings: Settings,
+    storage: StorageBackend,
+    fixture_path: Path | None = None,
+) -> JobResult:
+    existing_cves = storage.list_cves()
+    epss_records = EPSSClient(settings).load_records(fixture_path=fixture_path)
+    enriched_cves = enrich_cves_with_epss(existing_cves, epss_records)
+    changed = 0
+    for before, after in zip(existing_cves, enriched_cves, strict=True):
+        if before.epss_score != after.epss_score or before.tags != after.tags:
+            storage.upsert_cve(after)
+            changed += 1
+    return JobResult(
+        job="enrich:epss",
+        counts={"cves": len(existing_cves), "epss_records": len(epss_records), "updated": changed},
     )
 
 
