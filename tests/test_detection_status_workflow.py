@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from greynoc_detector_engine.models.detection import (
     DetectionKind,
     DetectionStatus,
@@ -7,7 +9,7 @@ from greynoc_detector_engine.models.detection import (
     ValidationEvidence,
     ValidationResult,
 )
-from greynoc_detector_engine.workers.jobs import update_detection_status
+from greynoc_detector_engine.workers.jobs import DetectionLifecycleError, update_detection_status
 
 
 class InMemoryDetectionStorage:
@@ -23,8 +25,8 @@ class InMemoryDetectionStorage:
         self.detections[record.detection_id] = record
 
 
-def test_update_detection_status_validates_detection_with_note_and_evidence() -> None:
-    detection = GeneratedDetection(
+def _draft_detection() -> GeneratedDetection:
+    return GeneratedDetection(
         detection_id="det-test",
         related_threat_id="thr-test",
         kind=DetectionKind.SIGMA,
@@ -32,8 +34,10 @@ def test_update_detection_status_validates_detection_with_note_and_evidence() ->
         description="Test detection.",
         rule_query="title: test",
     )
-    storage = InMemoryDetectionStorage(detection)
-    evidence = ValidationEvidence(
+
+
+def _passed_evidence() -> ValidationEvidence:
+    return ValidationEvidence(
         result=ValidationResult.PASSED,
         summary="Validated against representative telemetry.",
         telemetry_source="splunk-lab",
@@ -43,12 +47,16 @@ def test_update_detection_status_validates_detection_with_note_and_evidence() ->
         reviewer="grey-soc",
     )
 
+
+def test_update_detection_status_validates_detection_with_note_and_evidence() -> None:
+    storage = InMemoryDetectionStorage(_draft_detection())
+
     result = update_detection_status(
         storage,  # type: ignore[arg-type]
         "det-test",
         DetectionStatus.VALIDATED,
         note="Validated against representative telemetry.",
-        evidence=evidence,
+        evidence=_passed_evidence(),
     )
 
     assert result.status == "ok"
@@ -57,6 +65,44 @@ def test_update_detection_status_validates_detection_with_note_and_evidence() ->
     assert "Validated against representative telemetry." in updated.validation_steps
     assert updated.validation_evidence[0].result == ValidationResult.PASSED
     assert updated.validation_evidence[0].false_positive_count == 0
+
+
+def test_validated_detection_requires_passed_evidence() -> None:
+    storage = InMemoryDetectionStorage(_draft_detection())
+
+    with pytest.raises(DetectionLifecycleError):
+        update_detection_status(  # type: ignore[arg-type]
+            storage,
+            "det-test",
+            DetectionStatus.VALIDATED,
+        )
+
+
+def test_validated_detection_requires_reviewer_telemetry_and_sample_size() -> None:
+    storage = InMemoryDetectionStorage(_draft_detection())
+    incomplete = ValidationEvidence(
+        result=ValidationResult.PASSED,
+        summary="Incomplete validation evidence.",
+    )
+
+    with pytest.raises(DetectionLifecycleError):
+        update_detection_status(  # type: ignore[arg-type]
+            storage,
+            "det-test",
+            DetectionStatus.VALIDATED,
+            evidence=incomplete,
+        )
+
+
+def test_deprecated_detection_requires_note_or_evidence() -> None:
+    storage = InMemoryDetectionStorage(_draft_detection())
+
+    with pytest.raises(DetectionLifecycleError):
+        update_detection_status(  # type: ignore[arg-type]
+            storage,
+            "det-test",
+            DetectionStatus.DEPRECATED,
+        )
 
 
 def test_update_detection_status_returns_not_found() -> None:
