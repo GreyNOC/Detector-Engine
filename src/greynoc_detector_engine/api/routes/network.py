@@ -5,6 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
+from greynoc_detector_engine.api.job_locks import single_running_job
+from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam, apply_limit
 from greynoc_detector_engine.spacestation.orchestrator import (
     run_discovery_job,
     run_sensor_job,
@@ -19,37 +21,55 @@ Protected = Depends(require_api_key)
 def post_discover(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, Any]:
     """Run passive discovery once; persist devices and ICS classifications."""
     try:
-        result = run_discovery_job(storage)
+        with single_running_job("network:discover"):
+            result = run_discovery_job(storage)
+    except HTTPException:
+        raise
     except Exception as exc:  # pragma: no cover - defensive surface
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result.model_dump(mode="json")
 
 
 @router.get("/network/devices")
-def list_devices(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, Any]]:
-    return [d.model_dump(mode="json") for d in storage.list_network_devices()]
+def list_devices(
+    limit: LimitParam = DEFAULT_LIMIT,
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, Any]]:
+    return [d.model_dump(mode="json") for d in apply_limit(storage.list_network_devices(), limit)]
 
 
 @router.get("/network/ics-observations")
-def list_ics_observations(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, Any]]:
-    return [o.model_dump(mode="json") for o in storage.list_ics_observations()]
+def list_ics_observations(
+    limit: LimitParam = DEFAULT_LIMIT,
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, Any]]:
+    return [o.model_dump(mode="json") for o in apply_limit(storage.list_ics_observations(), limit)]
 
 
 @router.post("/sensor/run", dependencies=[Protected])
 def post_sensor_run(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, Any]:
     """Run a one-shot connection-table snapshot + scan detection cycle."""
     try:
-        result = run_sensor_job(storage)
+        with single_running_job("sensor:run"):
+            result = run_sensor_job(storage)
+    except HTTPException:
+        raise
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result.model_dump(mode="json")
 
 
 @router.get("/sensor/signals")
-def list_signals(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, Any]]:
-    return [s.model_dump(mode="json") for s in storage.list_intrusion_signals()]
+def list_signals(
+    limit: LimitParam = DEFAULT_LIMIT,
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, Any]]:
+    return [s.model_dump(mode="json") for s in apply_limit(storage.list_intrusion_signals(), limit)]
 
 
 @router.get("/sensor/honeypot/events")
-def list_honeypot_events(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, Any]]:
-    return [e.model_dump(mode="json") for e in storage.list_honeypot_events()]
+def list_honeypot_events(
+    limit: LimitParam = DEFAULT_LIMIT,
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, Any]]:
+    return [e.model_dump(mode="json") for e in apply_limit(storage.list_honeypot_events(), limit)]

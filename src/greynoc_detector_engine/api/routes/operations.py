@@ -11,6 +11,8 @@ from greynoc_detector_engine.api.dependencies import (
     require_api_key,
     resolve_fixture_path,
 )
+from greynoc_detector_engine.api.job_locks import single_running_job
+from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
@@ -33,21 +35,12 @@ def run_ingest(
     settings: Settings = Depends(get_app_settings),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
-    try:
-        result = run_ingest_job(
-            source=source,
-            settings=settings,
-            storage=storage,
-            fixture_path=fixture_path,
-        )
-    except IngestSourceUnavailable as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return result.model_dump(mode="json")
+    return _ingest_source(source, fixture_path, settings, storage)
 
 
 @router.get("/ingest/runs")
 def list_ingest_runs(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: LimitParam = DEFAULT_LIMIT,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
     runs = storage.list_source_runs(limit=limit)
@@ -90,21 +83,27 @@ def enrich_epss(
     settings: Settings = Depends(get_app_settings),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
-    return run_epss_enrichment_job(
-        settings=settings,
-        storage=storage,
-        fixture_path=fixture_path,
-    ).model_dump(mode="json")
+    with single_running_job("enrich:epss"):
+        return run_epss_enrichment_job(
+            settings=settings,
+            storage=storage,
+            fixture_path=fixture_path,
+        ).model_dump(mode="json")
 
 
 @router.post("/correlate/run", dependencies=[Protected])
 def run_correlate(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, object]:
-    return run_correlation_job(storage).model_dump(mode="json")
+    return _run_correlation(storage)
 
 
 @router.post("/correlate", dependencies=[Protected])
 def correlate(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, object]:
-    return run_correlation_job(storage).model_dump(mode="json")
+    return _run_correlation(storage)
+
+
+def _run_correlation(storage: SQLiteStorage) -> dict[str, object]:
+    with single_running_job("correlate"):
+        return run_correlation_job(storage).model_dump(mode="json")
 
 
 def _ingest_source(
@@ -114,12 +113,13 @@ def _ingest_source(
     storage: SQLiteStorage,
 ) -> dict[str, object]:
     try:
-        result = run_ingest_job(
-            source=source,
-            settings=settings,
-            storage=storage,
-            fixture_path=fixture_path,
-        )
+        with single_running_job(f"ingest:{source}"):
+            result = run_ingest_job(
+                source=source,
+                settings=settings,
+                storage=storage,
+                fixture_path=fixture_path,
+            )
     except IngestSourceUnavailable as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result.model_dump(mode="json")

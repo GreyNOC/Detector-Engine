@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from greynoc_detector_engine import __version__
@@ -20,7 +23,17 @@ from greynoc_detector_engine.api.routes import (
     threats,
 )
 from greynoc_detector_engine.config.settings import get_settings
+from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.utils.logging import configure_logging
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    storage = SQLiteStorage(settings.database_path)
+    storage.initialize()
+    app.state.storage = storage
+    yield
 
 
 def create_app() -> FastAPI:
@@ -30,6 +43,7 @@ def create_app() -> FastAPI:
         title="GreyNOC Detection Engine",
         version=__version__,
         description="Defensive threat-intelligence and detection catalog API.",
+        lifespan=lifespan,
     )
     app.include_router(health.router)
     app.include_router(sources.router)

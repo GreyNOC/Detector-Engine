@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
+from greynoc_detector_engine.api.job_locks import single_running_job
+from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam, apply_limit
 from greynoc_detector_engine.models.detection import (
     DetectionKind,
     DetectionStatus,
@@ -29,6 +31,7 @@ class DetectionStatusUpdateRequest(BaseModel):
 
 @router.get("/detections")
 def list_detections(
+    limit: LimitParam = DEFAULT_LIMIT,
     status: DetectionStatus | None = Query(default=None),
     kind: DetectionKind | None = Query(default=None),
     threat_id: str | None = Query(default=None),
@@ -41,7 +44,7 @@ def list_detections(
         records = [record for record in records if record.kind == kind]
     if threat_id is not None:
         records = [record for record in records if record.related_threat_id == threat_id]
-    return [record.model_dump(mode="json") for record in records]
+    return [record.model_dump(mode="json") for record in apply_limit(records, limit)]
 
 
 @router.get("/detections/{detection_id}")
@@ -60,7 +63,8 @@ def generate_detections(
     threat_id: str,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
-    result = generate_detections_for_threat(storage, threat_id)
+    with single_running_job(f"detections:generate:{threat_id}"):
+        result = generate_detections_for_threat(storage, threat_id)
     if result.status == "not_found":
         raise HTTPException(status_code=404, detail="Threat not found")
     return result.model_dump(mode="json")

@@ -3,14 +3,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from greynoc_detector_engine.api.dependencies import get_storage
+from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam, apply_limit
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 
 router = APIRouter()
 
 
 @router.get("/cves")
-def list_cves(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, object]]:
-    return [record.model_dump(mode="json") for record in storage.list_cves()]
+def list_cves(
+    limit: LimitParam = DEFAULT_LIMIT,
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, object]]:
+    return [record.model_dump(mode="json") for record in apply_limit(storage.list_cves(), limit)]
 
 
 @router.get("/cves/{cve_id}")

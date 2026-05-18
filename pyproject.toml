@@ -8,7 +8,7 @@ version = "0.9.1"
 description = "Defensive threat-intelligence and detection-engine framework for GreyNOC."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 authors = [{ name = "GreyNOC" }]
 dependencies = [
   "apscheduler>=3.10.4",

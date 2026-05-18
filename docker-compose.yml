@@ -2,12 +2,14 @@ services:
   greynoc-detector-engine:
     build: .
     environment:
+      GREYNOC_ENV: production
+      GREYNOC_API_KEY: ${GREYNOC_API_KEY:?GREYNOC_API_KEY is required for docker compose}
       GREYNOC_DATABASE_PATH: /app/data/threat_library/greynoc_detector_engine.sqlite
       GREYNOC_SOURCES_PATH: /app/config/sources.yaml
       GREYNOC_SCORING_PATH: /app/config/scoring.yaml
       GREYNOC_FETCH_LIVE: "false"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
