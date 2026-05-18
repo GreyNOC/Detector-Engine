@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from greynoc_detector_engine.api.dependencies import get_storage
+from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import generate_detections_for_threat
 
@@ -25,7 +25,7 @@ def get_detection(
     return record.model_dump(mode="json")
 
 
-@router.post("/detections/generate/{threat_id}")
+@router.post("/detections/generate/{threat_id}", dependencies=[Depends(require_api_key)])
 def generate_detections(
     threat_id: str,
     storage: SQLiteStorage = Depends(get_storage),
