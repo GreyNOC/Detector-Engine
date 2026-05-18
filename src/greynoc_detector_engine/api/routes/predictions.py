@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -9,6 +9,8 @@ from greynoc_detector_engine.api.dependencies import (
     get_storage,
     require_api_key,
 )
+from greynoc_detector_engine.api.job_locks import single_running_job
+from greynoc_detector_engine.api.pagination import LimitQuery, apply_limit
 from greynoc_detector_engine.api.safety import validate_fixture_path
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
@@ -26,24 +28,30 @@ def run_prediction(
 ) -> dict[str, Any]:
     """Re-run the predictive layer against existing stored threats."""
     inv = validate_fixture_path(asset_inventory, settings)
-    result = run_predict_job(storage, asset_inventory_path=inv)
+    with single_running_job("predict:run"):
+        result = run_predict_job(storage, asset_inventory_path=inv)
     return result.model_dump(mode="json")
 
 
 @router.get("/predict/forecasts/{threat_id}")
 def get_forecasts(
     threat_id: str,
+    limit: Annotated[int, LimitQuery],
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     threat = storage.get_threat(threat_id)
     if threat is None:
         raise HTTPException(status_code=404, detail="Threat not found")
-    return [f.model_dump(mode="json") for f in storage.list_forecasts_for_threat(threat_id)]
+    return [
+        f.model_dump(mode="json")
+        for f in apply_limit(storage.list_forecasts_for_threat(threat_id), limit)
+    ]
 
 
 @router.get("/predict/threat/{threat_id}")
 def get_threat_with_prediction(
     threat_id: str,
+    limit: Annotated[int, LimitQuery],
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, Any]:
     threat = storage.get_threat(threat_id)
@@ -52,12 +60,13 @@ def get_threat_with_prediction(
     likelihoods = storage.list_target_likelihoods_for_threat(threat_id)
     return {
         "threat": threat.model_dump(mode="json"),
-        "target_likelihoods": [tl.model_dump(mode="json") for tl in likelihoods],
+        "target_likelihoods": [tl.model_dump(mode="json") for tl in apply_limit(likelihoods, limit)],
     }
 
 
 @router.get("/predict/imminent")
 def list_imminent(
+    limit: Annotated[int, LimitQuery],
     min_probability: float = Query(default=0.5, ge=0.0, le=1.0),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
@@ -86,12 +95,15 @@ def list_imminent(
             }
         )
     out.sort(key=lambda row: float(row["attack_probability"]), reverse=True)
-    return out
+    return apply_limit(out, limit)
 
 
 @router.get("/campaigns")
-def list_campaigns(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, Any]]:
-    return [c.model_dump(mode="json") for c in storage.list_campaigns()]
+def list_campaigns(
+    limit: Annotated[int, LimitQuery],
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, Any]]:
+    return [c.model_dump(mode="json") for c in apply_limit(storage.list_campaigns(), limit)]
 
 
 @router.get("/campaigns/{campaign_id}")
