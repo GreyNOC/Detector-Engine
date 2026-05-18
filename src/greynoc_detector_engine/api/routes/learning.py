@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
 from greynoc_detector_engine.api.job_locks import single_running_job
-from greynoc_detector_engine.api.pagination import LimitParam, apply_limit
+from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam, apply_limit
 from greynoc_detector_engine.exporters import AttackNavigatorExporter, StixExporter
 from greynoc_detector_engine.models.feedback import AnalystVerdict, ThreatFeedback
 from greynoc_detector_engine.prediction.accuracy import compute_accuracy
@@ -54,7 +54,7 @@ def submit_feedback(
 
 @router.get("/feedback")
 def list_feedback(
-    limit: LimitParam,
+    limit: LimitParam = DEFAULT_LIMIT,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     return [fb.model_dump(mode="json") for fb in apply_limit(storage.list_threat_feedback(), limit)]

@@ -101,10 +101,12 @@ def test_storage_initializes_once_per_app_lifespan(
 
 
 def test_duplicate_job_lock_returns_conflict() -> None:
-    with single_running_job("test:duplicate"):
-        with pytest.raises(HTTPException) as exc_info:
-            with single_running_job("test:duplicate"):
-                pass
+    with (
+        single_running_job("test:duplicate"),
+        pytest.raises(HTTPException) as exc_info,
+        single_running_job("test:duplicate"),
+    ):
+        pass
 
     assert exc_info.value.status_code == 409
     assert "Job already running" in str(exc_info.value.detail)

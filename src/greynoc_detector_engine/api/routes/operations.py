@@ -12,7 +12,7 @@ from greynoc_detector_engine.api.dependencies import (
     resolve_fixture_path,
 )
 from greynoc_detector_engine.api.job_locks import single_running_job
-from greynoc_detector_engine.api.pagination import LimitParam
+from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
@@ -40,7 +40,7 @@ def run_ingest(
 
 @router.get("/ingest/runs")
 def list_ingest_runs(
-    limit: LimitParam,
+    limit: LimitParam = DEFAULT_LIMIT,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
     runs = storage.list_source_runs(limit=limit)

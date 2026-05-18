@@ -7,7 +7,7 @@ from fastapi import Query
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 
-LimitParam: TypeAlias = Annotated[int, Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)]
+LimitParam: TypeAlias = Annotated[int, Query(ge=1, le=MAX_LIMIT)]
 
 T = TypeVar("T")
 
