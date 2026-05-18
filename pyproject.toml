@@ -32,6 +32,8 @@ dev = [
 
 [project.scripts]
 greynoc-detector = "greynoc_detector_engine.cli.main:app"
+gn = "greynoc_detector_engine.cli.gn:main"
+GN = "greynoc_detector_engine.cli.gn:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/greynoc_detector_engine"]
