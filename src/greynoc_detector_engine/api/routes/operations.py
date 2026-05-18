@@ -17,6 +17,7 @@ from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import (
     IngestSourceName,
     run_correlation_job,
+    run_epss_enrichment_job,
     run_ingest_job,
 )
 
@@ -81,6 +82,19 @@ def ingest_rss(
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
     return _ingest_source("rss", fixture_path, settings, storage)
+
+
+@router.post("/enrich/epss", dependencies=[Protected])
+def enrich_epss(
+    fixture_path: FixturePath = None,
+    settings: Settings = Depends(get_app_settings),
+    storage: SQLiteStorage = Depends(get_storage),
+) -> dict[str, object]:
+    return run_epss_enrichment_job(
+        settings=settings,
+        storage=storage,
+        fixture_path=fixture_path,
+    ).model_dump(mode="json")
 
 
 @router.post("/correlate/run", dependencies=[Protected])
