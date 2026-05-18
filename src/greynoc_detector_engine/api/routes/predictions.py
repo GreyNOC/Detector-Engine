@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -10,7 +10,7 @@ from greynoc_detector_engine.api.dependencies import (
     require_api_key,
 )
 from greynoc_detector_engine.api.job_locks import single_running_job
-from greynoc_detector_engine.api.pagination import LimitQuery, apply_limit
+from greynoc_detector_engine.api.pagination import LimitParam, apply_limit
 from greynoc_detector_engine.api.safety import validate_fixture_path
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
@@ -36,7 +36,7 @@ def run_prediction(
 @router.get("/predict/forecasts/{threat_id}")
 def get_forecasts(
     threat_id: str,
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     threat = storage.get_threat(threat_id)
@@ -51,7 +51,7 @@ def get_forecasts(
 @router.get("/predict/threat/{threat_id}")
 def get_threat_with_prediction(
     threat_id: str,
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, Any]:
     threat = storage.get_threat(threat_id)
@@ -66,7 +66,7 @@ def get_threat_with_prediction(
 
 @router.get("/predict/imminent")
 def list_imminent(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     min_probability: float = Query(default=0.5, ge=0.0, le=1.0),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
@@ -100,7 +100,7 @@ def list_imminent(
 
 @router.get("/campaigns")
 def list_campaigns(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     return [c.model_dump(mode="json") for c in apply_limit(storage.list_campaigns(), limit)]
