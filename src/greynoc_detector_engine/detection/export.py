@@ -34,7 +34,7 @@ def build_detection_export_bundle(
     if threat_id is not None:
         filtered = [detection for detection in filtered if detection.related_threat_id == threat_id]
 
-    by_kind: dict[str, int] = defaultdict(int)
+    by_kind: defaultdict[str, int] = defaultdict(int)
     for detection in filtered:
         by_kind[detection.kind.value] += 1
 
