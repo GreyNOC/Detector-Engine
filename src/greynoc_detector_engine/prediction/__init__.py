@@ -16,11 +16,13 @@ from greynoc_detector_engine.prediction.features import (
     PredictiveFeatureBuilder,
     PredictiveFeatures,
 )
+from greynoc_detector_engine.prediction.signal_index import PredictionSignalIndex
 from greynoc_detector_engine.prediction.weaponization import WeaponizationModel
 
 __all__ = [
     "AttackForecaster",
     "ExploitTimingModel",
+    "PredictionSignalIndex",
     "PredictiveContext",
     "PredictiveFeatureBuilder",
     "PredictiveFeatures",

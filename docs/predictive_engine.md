@@ -91,9 +91,9 @@ All features are normalized to `[0, 1]`.
 | `kev_listed` | CISA KEV | already-known exploitation |
 | `cvss_pressure` | NVD | severity / 10 |
 | `public_exploit_availability` | NVD references | PoC / Metasploit / exploit-db |
-| `chatter_velocity` | RSS/news/GitHub | short/long-window mention ratio |
-| `independent_source_diversity` | source registry | # distinct trusted sources |
-| `trusted_source_corroboration` | source registry | # high-confidence sources |
+| `chatter_velocity` | prediction signal index | short/long-window mention ratio |
+| `independent_source_diversity` | prediction signal index | # distinct trusted sources |
+| `trusted_source_corroboration` | prediction signal index | # high-confidence sources |
 | `ransomware_proximity` | KEV + Ransomwatch + text | ransomware crew adjacency |
 | `actor_activity` | actor attributor | named actors co-mentioned |
 | `active_campaign` | campaign clusterer | inside an active cluster |
@@ -119,6 +119,9 @@ greynoc-detector correlate
 # Re-run only predictions (no re-ingest), optionally against an asset inventory
 greynoc-detector predict run --asset-inventory config/asset_inventory.yaml
 
+# Force a full recompute, ignoring unchanged input fingerprints
+greynoc-detector predict run --force
+
 # Inspect
 greynoc-detector predict forecasts thr-cve-cve-2026-12345
 greynoc-detector predict campaigns
@@ -128,6 +131,7 @@ greynoc-detector predict campaigns
 
 ```
 POST /predict/run?asset_inventory=config/asset_inventory.yaml
+POST /predict/run?force=true
 GET  /predict/forecasts/{threat_id}
 GET  /predict/threat/{threat_id}
 GET  /predict/imminent?min_probability=0.5
@@ -139,7 +143,23 @@ GET  /campaigns/{campaign_id}
 
 All weights live in `config/scoring.yaml` under `predictive_fusion_weights`.
 Hazard-model parameters live in `config/attack_horizon.yaml`. No code changes
-are required to retune the engine.
+are required to retune the engine. Probability calibration settings live in
+`config/scoring.yaml` under `calibration`; stored forecast outcomes provide the
+bucket hit rates used during prediction runs.
+
+## Performance and measurement
+
+Prediction runs now build a `PredictionSignalIndex` once per run. The index
+precomputes CVE-to-source mappings, trusted-source counts, source diversity,
+mention counts, and velocity scores, so individual threat forecasts do not
+rescan every raw item.
+
+Each run records a `ForecastRun` row with duration, threat count, raw item
+count, skipped count, write count, model version, config hash, threats/sec,
+raw items scanned, p95 forecast latency, Brier score, and precision@N. Inputs
+are fingerprinted per threat using threat/CVE/KEV/EPSS state, source and
+reputation watermarks, and model config version. Unchanged threats are skipped
+unless `--force` or `force=true` is supplied.
 
 ## What this is *not*
 

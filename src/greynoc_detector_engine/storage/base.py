@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Protocol
 
 from greynoc_detector_engine.enrich.reputation import IndicatorReputation
@@ -18,6 +19,8 @@ from greynoc_detector_engine.models.prediction import (
     AttackForecast,
     CampaignCluster,
     EPSSScore,
+    ForecastRun,
+    PredictionFingerprint,
 )
 from greynoc_detector_engine.models.scoring import ScoreEvent, ScoreResult
 from greynoc_detector_engine.models.source import SourceItem, SourceRun
@@ -31,6 +34,8 @@ class StorageBackend(Protocol):
     def upsert_raw_item(self, record: SourceItem) -> None: ...
 
     def list_raw_items(self) -> list[SourceItem]: ...
+
+    def list_raw_items_for_cves(self, cve_ids: list[str]) -> list[SourceItem]: ...
 
     def upsert_cve(self, record: CVERecord) -> None: ...
 
@@ -47,6 +52,8 @@ class StorageBackend(Protocol):
     def upsert_threat(self, record: ThreatRecord) -> None: ...
 
     def list_threats(self) -> list[ThreatRecord]: ...
+
+    def iter_threats(self, batch_size: int = 500) -> Iterator[list[ThreatRecord]]: ...
 
     def get_threat(self, threat_id: str) -> ThreatRecord | None: ...
 
@@ -86,6 +93,16 @@ class StorageBackend(Protocol):
 
     def list_forecasts_for_threat(self, threat_id: str) -> list[AttackForecast]: ...
 
+    def get_latest_forecast_for_threat(self, threat_id: str) -> AttackForecast | None: ...
+
+    def record_forecast_run(self, run: ForecastRun) -> ForecastRun: ...
+
+    def list_forecast_runs(self, limit: int = 100) -> list[ForecastRun]: ...
+
+    def get_prediction_fingerprint(self, threat_id: str) -> PredictionFingerprint | None: ...
+
+    def upsert_prediction_fingerprint(self, fingerprint: PredictionFingerprint) -> None: ...
+
     def upsert_indicator_reputation(self, reputation: IndicatorReputation) -> None: ...
 
     def list_indicator_reputation(self) -> list[IndicatorReputation]: ...
@@ -97,6 +114,16 @@ class StorageBackend(Protocol):
     def record_target_likelihood(self, likelihood: TargetLikelihood) -> None: ...
 
     def list_target_likelihoods_for_threat(self, threat_id: str) -> list[TargetLikelihood]: ...
+
+    def record_prediction_batch(
+        self,
+        *,
+        threats: list[ThreatRecord],
+        forecasts: list[tuple[str, AttackForecast]],
+        score_events: list[tuple[str, str, ScoreResult]],
+        target_likelihoods: list[TargetLikelihood],
+        fingerprints: list[PredictionFingerprint],
+    ) -> None: ...
 
     def upsert_network_device(self, device: NetworkDevice) -> None: ...
 

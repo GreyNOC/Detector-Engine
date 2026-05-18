@@ -34,6 +34,8 @@ def test_migration_creates_feedback_table(tmp_path: Path) -> None:
         }
     assert "threat_feedback" in tables
     assert "forecast_outcomes" in tables
+    assert "forecast_runs" in tables
+    assert "prediction_fingerprints" in tables
     assert "scan_baselines" in tables
 
 
