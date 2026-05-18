@@ -152,7 +152,7 @@ def test_darknet_honeypot_records_connection() -> None:
         pot = DarknetHoneypot(config)
         await pot.start()
         # Issue a connection attempt
-        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        _reader, writer = await asyncio.open_connection("127.0.0.1", port)
         writer.write(b"GET / HTTP/1.0\r\n\r\n")
         await writer.drain()
         # Server captures up to N bytes; give it a moment
