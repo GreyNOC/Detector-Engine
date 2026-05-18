@@ -30,11 +30,15 @@ not clone, download, install, import, or execute untrusted code.
   `kev_entries`, `threats`, `detections`, `source_runs`, and `score_events`.
 - Threat-library create/update/list/get/deduplicate behavior with version
   changelogs.
-- Basic correlation from CVEs to KEV, source references, exploit references,
-  and AI attack terms.
-- Explainable exploitability, risk, signal, and early-warning scoring.
+- Correlation from CVEs to KEV, source references, exploit references, and AI
+  attack terms.
+- Explainable exploitability, risk, signal, and early-warning scoring with
+  optional EPSS, exploit maturity, patch availability, internet exposure, and
+  asset-exposure enrichment.
 - Draft Sigma, Splunk SPL, Elastic KQL, Microsoft Defender KQL, YARA
   metadata-only, and Suricata metadata-only detection generation.
+- Protected detection lifecycle workflow for moving detections from draft to
+  validated or deprecated after SOC review.
 - FastAPI API and Typer CLI.
 
 ## Quickstart
@@ -68,6 +72,18 @@ Run the API:
 greynoc-detector serve --host 127.0.0.1 --port 8000
 ```
 
+## API Authentication
+
+Mutating API endpoints are protected when `GREYNOC_API_KEY` is configured. Pass
+the key as an `x-greynoc-api-key` header:
+
+```powershell
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" \
+  -X POST "http://127.0.0.1:8000/correlate"
+```
+
+If `GREYNOC_API_KEY` is unset, local development mode remains open.
+
 ## API Examples
 
 ```powershell
@@ -75,17 +91,27 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/sources
 curl http://127.0.0.1:8000/threats
 curl http://127.0.0.1:8000/ingest/runs
-curl -X POST "http://127.0.0.1:8000/ingest/cve?fixture=data/fixtures/cve_sample.json"
-curl -X POST "http://127.0.0.1:8000/ingest/kev?fixture=data/fixtures/kev_sample.json"
-curl -X POST "http://127.0.0.1:8000/ingest/rss?fixture=data/fixtures/rss_sample.xml"
-curl -X POST "http://127.0.0.1:8000/correlate"
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" -X POST "http://127.0.0.1:8000/ingest/cve?fixture=cve_sample.json"
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" -X POST "http://127.0.0.1:8000/ingest/kev?fixture=kev_sample.json"
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" -X POST "http://127.0.0.1:8000/ingest/rss?fixture=rss_sample.xml"
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" -X POST "http://127.0.0.1:8000/correlate"
 ```
 
 The generic ingest endpoint also supports source types that do not yet have a
 dedicated CLI command:
 
 ```powershell
-curl -X POST "http://127.0.0.1:8000/ingest/run?source=github&fixture=data/fixtures/github_sample.json"
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" \
+  -X POST "http://127.0.0.1:8000/ingest/run?source=github&fixture=github_sample.json"
+```
+
+Promote a reviewed detection to validated status:
+
+```powershell
+curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" \
+  -H "Content-Type: application/json" \
+  -X PATCH "http://127.0.0.1:8000/detections/det-example/status" \
+  -d '{"status":"validated","note":"Validated against representative telemetry."}'
 ```
 
 ## API Routes
@@ -107,6 +133,7 @@ curl -X POST "http://127.0.0.1:8000/ingest/run?source=github&fixture=data/fixtur
 - `POST /correlate`
 - `POST /correlate/run`
 - `POST /detections/generate/{threat_id}`
+- `PATCH /detections/{detection_id}/status`
 
 ## Local Fixture Workflow
 
@@ -119,7 +146,8 @@ live internet access:
 - `github_sample.json`
 
 Live fetching is disabled by default. Set `GREYNOC_FETCH_LIVE=true` only when
-you intentionally want configured HTTP sources to be queried.
+you intentionally want configured HTTP sources to be queried. API fixture paths
+are resolved under `GREYNOC_FIXTURE_ROOT` to prevent arbitrary filesystem reads.
 
 ## Source Run History
 
@@ -140,11 +168,18 @@ supplied by environment variables or `.env`, using `.env.example` as a template.
 Important environment variables:
 
 - `GREYNOC_DATABASE_PATH`
+- `GREYNOC_DATA_DIR`
+- `GREYNOC_FIXTURE_ROOT`
 - `GREYNOC_SOURCES_PATH`
 - `GREYNOC_SCORING_PATH`
 - `GREYNOC_FETCH_LIVE`
 - `GREYNOC_GITHUB_TOKEN`
+- `GREYNOC_API_KEY`
 - `GREYNOC_LOG_LEVEL`
+- `GREYNOC_REQUEST_TIMEOUT_SECONDS`
+- `GREYNOC_HTTP_RETRIES`
+- `GREYNOC_MAX_RESPONSE_BYTES`
+- `GREYNOC_ALLOWED_FETCH_HOSTS`
 
 ## Test Commands
 
@@ -162,16 +197,18 @@ docker compose up --build
 ```
 
 The container exposes the FastAPI app on port `8000` and mounts local `data/`
-and `config/`.
+and `config/`. The container runs as a non-root user and includes a `/health`
+healthcheck.
 
 ## Current Limits
 
 - The CLI currently exposes fixture ingest commands for CVE, KEV, and RSS.
   GitHub metadata ingest is available through the generic API/job path.
-- Generated detections are drafts only until validated with representative
-  telemetry.
+- Generated detections are drafts until validated with representative telemetry.
 - SQLite is the first storage backend; Postgres remains a planned extension.
 - Live source fetching must be enabled deliberately with `GREYNOC_FETCH_LIVE`.
+- API-key auth is a starter protection layer; full user/RBAC support remains a
+  planned extension.
 
 ## Roadmap
 
@@ -179,5 +216,7 @@ and `config/`.
 - Add Postgres storage behind the existing storage protocol.
 - Add authenticated GitHub search adapter with rate-limit handling.
 - Add asset inventory and affected-product popularity enrichment.
-- Add validation workflows for promoting draft detections to validated status.
-
+- Add validation evidence capture for promoting draft detections to validated
+  status.
+- Add SIEM/lake integrations for validating and tuning detections against real
+  telemetry.
