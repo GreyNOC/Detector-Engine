@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import typer
 
 from greynoc_detector_engine.config.settings import get_settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
+from greynoc_detector_engine.models.detection import DetectionKind, DetectionStatus
+from greynoc_detector_engine.models.threat import ThreatRecord, ThreatSeverity, ThreatStatus
 from greynoc_detector_engine.utils.logging import configure_logging
 from greynoc_detector_engine.workers.jobs import (
     build_storage,
@@ -18,6 +20,19 @@ from greynoc_detector_engine.workers.jobs import (
     run_predict_job,
     run_score_job,
 )
+
+DEFAULT_CLI_LIMIT = 100
+MAX_CLI_LIMIT = 500
+IngestCliSource = Literal[
+    "cve",
+    "kev",
+    "rss",
+    "epss",
+    "threatfox",
+    "urlhaus",
+    "ransomwatch",
+    "git",
+]
 
 app = typer.Typer(help="GreyNOC Detector Engine defensive SOC-support CLI.")
 ingest_app = typer.Typer(help="Ingest configured or fixture-backed sources.")
@@ -51,6 +66,37 @@ def main() -> None:
 def init_command() -> None:
     result = initialize_project(get_settings())
     typer.echo(result.model_dump_json())
+
+
+@app.command("status")
+def status_command(
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show a compact local engine status summary."""
+    storage = build_storage(get_settings())
+    threats = storage.list_threats()
+    detections = storage.list_detections()
+    forecasts = sum(1 for threat in threats if threat.attack_forecast is not None)
+    payload: dict[str, Any] = {
+        "counts": {
+            "cves": len(storage.list_cves()),
+            "kev_entries": len(storage.list_kev()),
+            "raw_items": len(storage.list_raw_items()),
+            "threats": len(threats),
+            "campaigns": len(storage.list_campaigns()),
+            "detections": len(detections),
+            "forecasts": forecasts,
+            "network_devices": len(storage.list_network_devices()),
+            "intrusion_signals": len(storage.list_intrusion_signals()),
+            "honeypot_events": len(storage.list_honeypot_events()),
+        },
+        "detections_by_status": _count_by_value([d.status.value for d in detections]),
+        "threats_by_severity": _count_by_value([t.severity.value for t in threats]),
+        "latest_ingest_runs": [
+            run.model_dump(mode="json") for run in storage.list_source_runs(limit=5)
+        ],
+    }
+    _emit_json(payload, pretty=pretty)
 
 
 @ingest_app.command("cve")
@@ -120,6 +166,52 @@ def ingest_git(
     _run_ingest("git", fixture)
 
 
+@ingest_app.command("all")
+def ingest_all(
+    include_git: bool = typer.Option(
+        False,
+        "--include-git",
+        help="Also ingest configured allowlisted git repositories.",
+    ),
+    continue_on_error: bool = typer.Option(
+        True,
+        "--continue-on-error/--stop-on-error",
+        help="Continue with the next source if one source fails.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Run the standard defensive ingest sequence across configured sources."""
+    settings = get_settings()
+    storage = build_storage(settings)
+    sources: list[IngestCliSource] = [
+        "cve",
+        "kev",
+        "rss",
+        "epss",
+        "threatfox",
+        "urlhaus",
+        "ransomwatch",
+    ]
+    if include_git:
+        sources.append("git")
+
+    results: list[dict[str, Any]] = []
+    failed = False
+    for source in sources:
+        try:
+            result = run_ingest_job(source=source, settings=settings, storage=storage)
+            results.append(result.model_dump(mode="json"))
+        except Exception as exc:
+            failed = True
+            results.append({"job": f"ingest:{source}", "status": "failed", "error": str(exc)})
+            if not continue_on_error:
+                break
+
+    _emit_json({"status": "failed" if failed else "ok", "results": results}, pretty=pretty)
+    if failed:
+        raise typer.Exit(1)
+
+
 @app.command("correlate")
 def correlate_command(
     ransomware_posts_30d: int = typer.Option(0, "--ransomware-posts-30d"),
@@ -151,34 +243,98 @@ def predict_run(
 
 
 @predict_app.command("forecasts")
-def predict_forecasts(threat_id: str) -> None:
+def predict_forecasts(
+    threat_id: str,
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     storage = build_storage(get_settings())
-    forecasts = storage.list_forecasts_for_threat(threat_id)
-    typer.echo(json.dumps([f.model_dump(mode="json") for f in forecasts]))
+    forecasts = storage.list_forecasts_for_threat(threat_id)[:limit]
+    _emit_json([f.model_dump(mode="json") for f in forecasts], pretty=pretty)
 
 
 @predict_app.command("campaigns")
-def predict_campaigns() -> None:
+def predict_campaigns(
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     storage = build_storage(get_settings())
-    campaigns = storage.list_campaigns()
-    typer.echo(json.dumps([c.model_dump(mode="json") for c in campaigns]))
+    campaigns = storage.list_campaigns()[:limit]
+    _emit_json([c.model_dump(mode="json") for c in campaigns], pretty=pretty)
+
+
+@predict_app.command("imminent")
+def predict_imminent(
+    min_probability: float = typer.Option(0.5, "--min-probability", min=0.0, max=1.0),
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List forecasted imminent or near-term threats above a probability threshold."""
+    storage = build_storage(get_settings())
+    rows: list[dict[str, Any]] = []
+    for threat in storage.list_threats():
+        forecast = threat.attack_forecast
+        if forecast is None:
+            continue
+        if forecast.horizon.value not in {"imminent", "near_term"}:
+            continue
+        if forecast.attack_probability < min_probability:
+            continue
+        rows.append(_threat_summary(threat))
+    rows.sort(key=lambda row: float(row.get("attack_probability") or 0.0), reverse=True)
+    _emit_json(rows[:limit], pretty=pretty)
 
 
 @threats_app.command("list")
-def list_threats() -> None:
+def list_threats(
+    severity: str | None = typer.Option(None, "--severity", help="Filter by severity."),
+    status: str | None = typer.Option(None, "--status", help="Filter by threat status."),
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    summary: bool = typer.Option(False, "--summary", help="Return compact threat summaries."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     storage = build_storage(get_settings())
-    payload = [threat.model_dump(mode="json") for threat in storage.list_threats()]
-    typer.echo(json.dumps(payload))
+    threats = storage.list_threats()
+    if severity is not None:
+        parsed_severity = _parse_enum(ThreatSeverity, severity, "severity")
+        threats = [threat for threat in threats if threat.severity == parsed_severity]
+    if status is not None:
+        parsed_status = _parse_enum(ThreatStatus, status, "status")
+        threats = [threat for threat in threats if threat.status == parsed_status]
+    threats = threats[:limit]
+    payload: Any
+    if summary:
+        payload = [_threat_summary(threat) for threat in threats]
+    else:
+        payload = [threat.model_dump(mode="json") for threat in threats]
+    _emit_json(payload, pretty=pretty)
+
+
+@threats_app.command("top")
+def top_threats(
+    limit: int = typer.Option(10, "--limit", min=1, max=MAX_CLI_LIMIT),
+    min_probability: float = typer.Option(0.0, "--min-probability", min=0.0, max=1.0),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show the highest-priority threats by forecast probability and severity."""
+    storage = build_storage(get_settings())
+    rows = [_threat_summary(threat) for threat in storage.list_threats()]
+    rows = [row for row in rows if float(row.get("attack_probability") or 0.0) >= min_probability]
+    rows.sort(key=_threat_priority_sort_key, reverse=True)
+    _emit_json(rows[:limit], pretty=pretty)
 
 
 @threats_app.command("show")
-def show_threat(threat_id: str) -> None:
+def show_threat(
+    threat_id: str,
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     storage = build_storage(get_settings())
     threat = storage.get_threat(threat_id)
     if threat is None:
         typer.echo(f"Threat not found: {threat_id}", err=True)
         raise typer.Exit(1)
-    typer.echo(threat.model_dump_json())
+    _emit_json(threat.model_dump(mode="json"), pretty=pretty)
 
 
 @detections_app.command("generate")
@@ -188,6 +344,49 @@ def generate_detection(threat_id: str) -> None:
         typer.echo(f"Threat not found: {threat_id}", err=True)
         raise typer.Exit(1)
     typer.echo(result.model_dump_json())
+
+
+@detections_app.command("list")
+def list_detections(
+    status: str | None = typer.Option(None, "--status", help="Filter by detection status."),
+    kind: str | None = typer.Option(None, "--kind", help="Filter by detection kind."),
+    threat_id: str | None = typer.Option(None, "--threat-id", help="Filter by related threat."),
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    summary: bool = typer.Option(False, "--summary", help="Return compact detection summaries."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List generated detections with optional defensive-review filters."""
+    storage = build_storage(get_settings())
+    detections = storage.list_detections()
+    if status is not None:
+        parsed_status = _parse_enum(DetectionStatus, status, "status")
+        detections = [detection for detection in detections if detection.status == parsed_status]
+    if kind is not None:
+        parsed_kind = _parse_enum(DetectionKind, kind, "kind")
+        detections = [detection for detection in detections if detection.kind == parsed_kind]
+    if threat_id is not None:
+        detections = [detection for detection in detections if detection.related_threat_id == threat_id]
+    detections = detections[:limit]
+    payload: Any
+    if summary:
+        payload = [_detection_summary(detection) for detection in detections]
+    else:
+        payload = [detection.model_dump(mode="json") for detection in detections]
+    _emit_json(payload, pretty=pretty)
+
+
+@detections_app.command("show")
+def show_detection(
+    detection_id: str,
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show one generated detection by ID."""
+    storage = build_storage(get_settings())
+    detection = storage.get_detection(detection_id)
+    if detection is None:
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(detection.model_dump(mode="json"), pretty=pretty)
 
 
 @network_app.command("discover")
@@ -200,17 +399,29 @@ def network_discover() -> None:
 
 
 @network_app.command("devices")
-def network_devices() -> None:
+def network_devices(
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     """List devices known to the local-network inventory."""
     storage = build_storage(get_settings())
-    typer.echo(json.dumps([d.model_dump(mode="json") for d in storage.list_network_devices()]))
+    _emit_json(
+        [d.model_dump(mode="json") for d in storage.list_network_devices()[:limit]],
+        pretty=pretty,
+    )
 
 
 @network_app.command("ics")
-def network_ics_observations() -> None:
+def network_ics_observations(
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     """List ICS protocol observations classified from passive discovery."""
     storage = build_storage(get_settings())
-    typer.echo(json.dumps([o.model_dump(mode="json") for o in storage.list_ics_observations()]))
+    _emit_json(
+        [o.model_dump(mode="json") for o in storage.list_ics_observations()[:limit]],
+        pretty=pretty,
+    )
 
 
 @sensor_app.command("run")
@@ -223,10 +434,29 @@ def sensor_run() -> None:
 
 
 @sensor_app.command("signals")
-def sensor_signals() -> None:
+def sensor_signals(
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     """List recent intrusion signals (port scans, knocks, darknet hits, ICS probes)."""
     storage = build_storage(get_settings())
-    typer.echo(json.dumps([s.model_dump(mode="json") for s in storage.list_intrusion_signals()]))
+    _emit_json(
+        [s.model_dump(mode="json") for s in storage.list_intrusion_signals()[:limit]],
+        pretty=pretty,
+    )
+
+
+@sensor_app.command("honeypot-events")
+def sensor_honeypot_events(
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List captured darknet honeypot events."""
+    storage = build_storage(get_settings())
+    _emit_json(
+        [event.model_dump(mode="json") for event in storage.list_honeypot_events()[:limit]],
+        pretty=pretty,
+    )
 
 
 @sensor_app.command("honeypot")
@@ -264,7 +494,7 @@ def sensor_honeypot(
         allow_external_bind=allow_external_bind,
     )
 
-    def on_event(event):  # type: ignore[no-untyped-def]
+    def on_event(event: Any) -> None:
         storage.record_honeypot_event(event)
         typer.echo(event.model_dump_json())
 
@@ -315,21 +545,25 @@ def feedback_submit(
     all_feedback = storage.list_threat_feedback()
     threats_by_id = {t.threat_id: t for t in storage.list_threats()}
     new_weights = FeedbackTuner().apply(all_feedback, threats_by_id)
-    typer.echo(
-        json.dumps(
-            {
-                "feedback_id": feedback.feedback_id,
-                "verdict": parsed_verdict.value,
-                "applied_weights": new_weights,
-            }
-        )
+    _emit_json(
+        {
+            "feedback_id": feedback.feedback_id,
+            "verdict": parsed_verdict.value,
+            "applied_weights": new_weights,
+        }
     )
 
 
 @feedback_app.command("list")
-def feedback_list() -> None:
+def feedback_list(
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
     storage = build_storage(get_settings())
-    typer.echo(json.dumps([fb.model_dump(mode="json") for fb in storage.list_threat_feedback()]))
+    _emit_json(
+        [fb.model_dump(mode="json") for fb in storage.list_threat_feedback()[:limit]],
+        pretty=pretty,
+    )
 
 
 @predict_app.command("counterfactual")
@@ -475,10 +709,7 @@ def serve_command(
     uvicorn.run("greynoc_detector_engine.api.main:create_app", factory=True, host=host, port=port)
 
 
-def _run_ingest(
-    source: Literal["cve", "kev", "rss", "epss", "threatfox", "urlhaus", "ransomwatch", "git"],
-    fixture: Path | None,
-) -> None:
+def _run_ingest(source: IngestCliSource, fixture: Path | None) -> None:
     settings = get_settings()
     storage = build_storage(settings)
     try:
@@ -491,6 +722,68 @@ def _run_ingest(
     except IngestSourceUnavailable as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(result.model_dump_json())
+
+
+def _emit_json(payload: Any, *, pretty: bool = False) -> None:
+    indent = 2 if pretty else None
+    typer.echo(json.dumps(payload, indent=indent, sort_keys=pretty))
+
+
+def _count_by_value(values: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _parse_enum(enum_type: type[Any], raw: str, name: str) -> Any:
+    try:
+        return enum_type(raw)
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in enum_type)
+        raise typer.BadParameter(f"Invalid {name}: {raw}. Expected one of: {allowed}") from exc
+
+
+def _threat_summary(threat: ThreatRecord) -> dict[str, Any]:
+    forecast = threat.attack_forecast
+    predictive_score = threat.predictive_score
+    return {
+        "threat_id": threat.threat_id,
+        "title": threat.title,
+        "severity": threat.severity.value,
+        "status": threat.status.value,
+        "confidence": threat.confidence,
+        "predictive_score": predictive_score.score if predictive_score is not None else None,
+        "attack_probability": forecast.attack_probability if forecast is not None else None,
+        "horizon": forecast.horizon.value if forecast is not None else None,
+        "related_cves": threat.related_cves,
+        "campaign_ids": threat.campaign_ids,
+        "recommended_soc_actions": threat.recommended_soc_actions[:5],
+    }
+
+
+def _detection_summary(detection: Any) -> dict[str, Any]:
+    return {
+        "detection_id": detection.detection_id,
+        "related_threat_id": detection.related_threat_id,
+        "kind": detection.kind.value,
+        "status": detection.status.value,
+        "title": detection.title,
+        "confidence": detection.confidence,
+        "required_telemetry": detection.required_telemetry,
+    }
+
+
+def _threat_priority_sort_key(row: dict[str, Any]) -> tuple[float, float, float]:
+    severity_weight = {
+        "critical": 4.0,
+        "high": 3.0,
+        "medium": 2.0,
+        "low": 1.0,
+    }.get(str(row.get("severity")), 0.0)
+    attack_probability = float(row.get("attack_probability") or 0.0)
+    predictive_score = float(row.get("predictive_score") or 0.0)
+    return (attack_probability, severity_weight, predictive_score)
 
 
 if __name__ == "__main__":
