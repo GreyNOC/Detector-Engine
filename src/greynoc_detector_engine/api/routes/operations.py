@@ -36,6 +36,18 @@ def run_ingest(
     return result.model_dump(mode="json")
 
 
+@router.get("/ingest/runs")
+def list_ingest_runs(
+    limit: int = Query(default=100, ge=1, le=500),
+    storage: SQLiteStorage = Depends(get_storage),
+) -> dict[str, object]:
+    runs = storage.list_source_runs(limit=limit)
+    return {
+        "count": len(runs),
+        "runs": [run.model_dump(mode="json") for run in runs],
+    }
+
+
 @router.post("/ingest/cve")
 def ingest_cve(
     fixture: str | None = Query(default=None),
