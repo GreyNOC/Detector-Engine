@@ -26,6 +26,10 @@ greynoc-detector ingest kev --fixture data/fixtures/kev_sample.json
 greynoc-detector ingest rss --fixture data/fixtures/rss_sample.xml
 ```
 
+Each ingest run is recorded with source id, status, item count, start time, end
+time, and error details when a source fails. This gives operators a lightweight
+audit trail without needing to scrape process logs.
+
 ## Correlation, Scoring, And Detections
 
 ```powershell
@@ -53,11 +57,18 @@ Core routes:
 - `GET /kev`
 - `GET /detections`
 - `GET /detections/{detection_id}`
+- `GET /ingest/runs`
 - `POST /ingest/cve`
 - `POST /ingest/kev`
 - `POST /ingest/rss`
 - `POST /correlate`
 - `POST /detections/generate/{threat_id}`
+
+Example run-history check:
+
+```powershell
+curl "http://127.0.0.1:8000/ingest/runs?limit=25"
+```
 
 ## Tests
 
