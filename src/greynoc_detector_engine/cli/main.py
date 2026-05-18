@@ -50,6 +50,7 @@ sensor_app = typer.Typer(help="Spacestation: lightweight intrusion sensor + dark
 feedback_app = typer.Typer(help="Submit analyst feedback that re-tunes predictive weights.")
 export_app = typer.Typer(help="Export the threat library to STIX 2.1 or ATT&CK Navigator.")
 doctor_app = typer.Typer(help="Engine self-diagnostic: safety defaults + source health.")
+workflow_app = typer.Typer(help="Repeatable operator workflows (golden path demo, etc.).")
 
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(threats_app, name="threats")
@@ -60,6 +61,7 @@ app.add_typer(sensor_app, name="sensor")
 app.add_typer(feedback_app, name="feedback")
 app.add_typer(export_app, name="export")
 app.add_typer(doctor_app, name="doctor")
+app.add_typer(workflow_app, name="workflow")
 
 
 @app.callback()
@@ -72,6 +74,44 @@ def main() -> None:
 def init_command() -> None:
     result = initialize_project(get_settings())
     typer.echo(result.model_dump_json())
+
+
+@workflow_app.command("demo")
+def workflow_demo(
+    fixture_root: Path | None = typer.Option(
+        None,
+        "--fixture-root",
+        exists=True,
+        readable=True,
+        file_okay=False,
+        dir_okay=True,
+        help="Override the directory containing fixture sources.",
+    ),
+    skip_detections: bool = typer.Option(
+        False,
+        "--skip-detections",
+        help="Skip the draft-detection generation step.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Run the local golden-path workflow against bundled fixtures.
+
+    Fully offline by default. The command initializes local paths, ingests
+    fixture-backed sources, correlates weak signals, runs the predictive
+    layer, and (unless ``--skip-detections``) generates draft detections.
+    It prints a compact JSON summary at the end.
+    """
+    from greynoc_detector_engine.workers.workflow import run_workflow_demo
+
+    settings = get_settings()
+    report = run_workflow_demo(
+        settings,
+        fixture_root=fixture_root,
+        generate_detections=not skip_detections,
+    )
+    _emit_json(report.model_dump(mode="json"), pretty=pretty)
+    if report.status == "failed":
+        raise typer.Exit(1)
 
 
 @app.command("status")
@@ -372,9 +412,7 @@ def list_detections(
         detections = [detection for detection in detections if detection.kind == parsed_kind]
     if threat_id is not None:
         detections = [
-            detection
-            for detection in detections
-            if detection.related_threat_id == threat_id
+            detection for detection in detections if detection.related_threat_id == threat_id
         ]
     detections = detections[:limit]
     payload: Any
