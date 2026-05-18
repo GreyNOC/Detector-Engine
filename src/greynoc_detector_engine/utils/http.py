@@ -3,8 +3,8 @@
 Constraints (do not relax without updating docs/security_review.md):
 
   * Bounded body size. We refuse to load responses larger than
-    ``max_response_bytes`` (defaults to 50 MiB) so a hostile server can't
-    exhaust memory; the limit is enforced *streaming*, not after read.
+    ``max_response_bytes`` (defaults to 5,000,000 bytes) so a hostile server
+    can't exhaust memory; the limit is enforced *streaming*, not after read.
   * Bounded redirect chain. We allow at most :data:`MAX_REDIRECTS` hops so a
     redirect chain can't drag us to an unrelated host (SSRF amplification).
   * Host allowlist. When ``allowed_hosts`` is non-empty, only those hosts
@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-DEFAULT_MAX_BYTES: int = 50 * 1024 * 1024  # 50 MiB
+DEFAULT_MAX_BYTES: int = 5_000_000
 MAX_REDIRECTS: int = 5
 
 
