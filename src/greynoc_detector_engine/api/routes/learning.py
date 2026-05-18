@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
+from greynoc_detector_engine.api.job_locks import single_running_job
+from greynoc_detector_engine.api.pagination import LimitQuery, apply_limit
 from greynoc_detector_engine.exporters import AttackNavigatorExporter, StixExporter
 from greynoc_detector_engine.models.feedback import AnalystVerdict, ThreatFeedback
 from greynoc_detector_engine.prediction.accuracy import compute_accuracy
@@ -51,8 +53,11 @@ def submit_feedback(
 
 
 @router.get("/feedback")
-def list_feedback(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, Any]]:
-    return [fb.model_dump(mode="json") for fb in storage.list_threat_feedback()]
+def list_feedback(
+    limit: Annotated[int, LimitQuery],
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, Any]]:
+    return [fb.model_dump(mode="json") for fb in apply_limit(storage.list_threat_feedback(), limit)]
 
 
 @router.get("/predict/accuracy")
@@ -87,7 +92,8 @@ def post_counterfactual(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     ctx = PredictiveContext(threat=threat, cve=cve, kev=kev)
-    results = CounterfactualEngine().evaluate(ctx, parsed)
+    with single_running_job(f"predict:counterfactual:{threat_id}"):
+        results = CounterfactualEngine().evaluate(ctx, parsed)
     return [r.model_dump(mode="json") for r in results]
 
 
