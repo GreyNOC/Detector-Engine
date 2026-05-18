@@ -169,3 +169,41 @@ def test_api_jobs_list_respects_limit_bounds(isolated_settings) -> None:
 
     too_small = client.get("/jobs", params={"limit": 0})
     assert too_small.status_code == 422
+
+
+def test_api_correlate_records_job_history(isolated_settings) -> None:
+    client = TestClient(create_app())
+
+    response = client.post("/correlate")
+    assert response.status_code == 200
+
+    entries = client.get("/jobs", params={"job_type": "correlate"}).json()
+    assert entries, "Expected a correlate job-history entry after POST /correlate"
+    assert entries[0]["job_type"] == "correlate"
+    assert entries[0]["status"] in {"completed", "running"}
+
+
+def test_api_ingest_records_job_history(isolated_settings) -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/ingest/run",
+        params={"source": "cve", "fixture": "cve_sample.json"},
+    )
+    assert response.status_code == 200
+
+    entries = client.get("/jobs", params={"job_type": "ingest:cve"}).json()
+    assert entries
+    assert entries[0]["job_type"] == "ingest:cve"
+    assert entries[0]["result_summary"].get("records", 0) >= 1
+
+
+def test_api_predict_records_job_history(isolated_settings) -> None:
+    client = TestClient(create_app())
+
+    response = client.post("/predict/run")
+    assert response.status_code == 200
+
+    entries = client.get("/jobs", params={"job_type": "predict"}).json()
+    assert entries
+    assert entries[0]["job_type"] == "predict"

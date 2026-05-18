@@ -15,6 +15,7 @@ from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import (
     DetectionLifecycleError,
     generate_detections_for_threat,
+    record_job,
     update_detection_status,
 )
 
@@ -63,8 +64,11 @@ def generate_detections(
     threat_id: str,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
-    with single_running_job(f"detections:generate:{threat_id}"):
+    job_type = f"detections:generate:{threat_id}"
+    with single_running_job(job_type), record_job(storage, job_type) as summary:
         result = generate_detections_for_threat(storage, threat_id)
+        summary.update(result.counts)
+        summary["status"] = result.status
     if result.status == "not_found":
         raise HTTPException(status_code=404, detail="Threat not found")
     return result.model_dump(mode="json")
