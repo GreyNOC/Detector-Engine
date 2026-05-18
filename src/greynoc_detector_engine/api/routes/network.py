@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
 from greynoc_detector_engine.api.job_locks import single_running_job
-from greynoc_detector_engine.api.pagination import LimitQuery, apply_limit
+from greynoc_detector_engine.api.pagination import LimitParam, apply_limit
 from greynoc_detector_engine.spacestation.orchestrator import (
     run_discovery_job,
     run_sensor_job,
@@ -32,7 +32,7 @@ def post_discover(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, An
 
 @router.get("/network/devices")
 def list_devices(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     return [d.model_dump(mode="json") for d in apply_limit(storage.list_network_devices(), limit)]
@@ -40,7 +40,7 @@ def list_devices(
 
 @router.get("/network/ics-observations")
 def list_ics_observations(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     return [o.model_dump(mode="json") for o in apply_limit(storage.list_ics_observations(), limit)]
@@ -61,7 +61,7 @@ def post_sensor_run(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, 
 
 @router.get("/sensor/signals")
 def list_signals(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     return [s.model_dump(mode="json") for s in apply_limit(storage.list_intrusion_signals(), limit)]
@@ -69,7 +69,7 @@ def list_signals(
 
 @router.get("/sensor/honeypot/events")
 def list_honeypot_events(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> list[dict[str, Any]]:
     return [e.model_dump(mode="json") for e in apply_limit(storage.list_honeypot_events(), limit)]
