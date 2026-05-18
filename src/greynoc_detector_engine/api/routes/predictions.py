@@ -23,13 +23,14 @@ Protected = Depends(require_api_key)
 @router.post("/predict/run", dependencies=[Protected])
 def run_prediction(
     asset_inventory: str | None = Query(default=None),
+    force: bool = Query(default=False),
     settings: Settings = Depends(get_app_settings),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, Any]:
     """Re-run the predictive layer against existing stored threats."""
     inv = validate_fixture_path(asset_inventory, settings)
     with single_running_job("predict:run"):
-        result = run_predict_job(storage, asset_inventory_path=inv)
+        result = run_predict_job(storage, asset_inventory_path=inv, force=force)
     return result.model_dump(mode="json")
 
 

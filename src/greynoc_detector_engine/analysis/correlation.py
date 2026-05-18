@@ -5,6 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from greynoc_detector_engine.analysis.campaign import CampaignClusterer
 from greynoc_detector_engine.analysis.narrative_builder import NarrativeBuilder
 from greynoc_detector_engine.analysis.soc_recommendations import SOCRecommendationBuilder
+from greynoc_detector_engine.config.settings import (
+    load_attack_horizon_config,
+    load_scoring_config,
+)
 from greynoc_detector_engine.enrich.epss import EPSSEnricher
 from greynoc_detector_engine.enrich.reputation import IndicatorReputationEngine
 from greynoc_detector_engine.enrich.threat_actor import ThreatActorAttributor
@@ -20,6 +24,7 @@ from greynoc_detector_engine.prediction.features import (
     PredictiveContext,
     PredictiveFeatureBuilder,
 )
+from greynoc_detector_engine.prediction.signal_index import PredictionSignalIndex
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
 from greynoc_detector_engine.scoring.early_warning import (
     EarlyWarningScorer,
@@ -83,7 +88,11 @@ class CorrelationEngine:
             actor_attributor=self.actor_attributor,
             epss=self.epss,
         )
-        self.forecaster = AttackForecaster(feature_builder=self.feature_builder)
+        self.forecaster = AttackForecaster.from_config(
+            scoring_config=load_scoring_config(),
+            horizon_config=load_attack_horizon_config(),
+            feature_builder=self.feature_builder,
+        )
         self.predictive_scorer = PredictiveScorer()
         self.campaign = CampaignClusterer()
 
@@ -103,7 +112,8 @@ class CorrelationEngine:
         relationships: list[CorrelationRelationship] = []
         threats: list[ThreatRecord] = []
         kev_by_cve = {entry.cve_id: entry for entry in kev_entries}
-        items_by_cve = self._items_by_cve(source_items)
+        signal_index = PredictionSignalIndex.build(source_items)
+        items_by_cve = signal_index.items_by_cve
 
         for cve in cves:
             kev = kev_by_cve.get(cve.cve_id)
@@ -138,6 +148,7 @@ class CorrelationEngine:
                 source_items=source_items,
                 ransomware_posts_30d=ransomware_posts_30d,
                 local_intrusion_pressure=local_intrusion_pressure,
+                signal_index=signal_index,
             )
             threats.append(threat)
 
@@ -157,13 +168,24 @@ class CorrelationEngine:
                 source_items=source_items,
                 ransomware_posts_30d=ransomware_posts_30d,
                 local_intrusion_pressure=local_intrusion_pressure,
+                signal_index=signal_index,
             )
             threats.append(threat)
 
         # Cluster into campaigns after each threat is scored so cluster cohesion
         # can in turn feed back into threats' active_campaign flag.
         campaigns = self.campaign.cluster(threats, source_items)
-        threats = self._mark_campaign_membership(threats, campaigns)
+        cves_by_id = {cve.cve_id: cve for cve in cves}
+        threats = self._mark_campaign_membership(
+            threats,
+            campaigns,
+            cves_by_id=cves_by_id,
+            kev_by_cve=kev_by_cve,
+            source_items=source_items,
+            ransomware_posts_30d=ransomware_posts_30d,
+            local_intrusion_pressure=local_intrusion_pressure,
+            signal_index=signal_index,
+        )
         for cluster in campaigns:
             for tid in cluster.related_threat_ids:
                 relationships.append(
@@ -191,16 +213,20 @@ class CorrelationEngine:
         source_items: list[SourceItem] | None = None,
         ransomware_posts_30d: int = 0,
         local_intrusion_pressure: float = 0.0,
+        signal_index: PredictionSignalIndex | None = None,
     ) -> ThreatRecord:
         """Re-run the full reactive + predictive scoring pipeline on a single threat."""
+        source_items = source_items or []
+        signal_index = signal_index or PredictionSignalIndex.build(source_items)
         return self._score_threat(
             threat,
             cve=cve,
             kev=kev,
-            related_items=[],
-            source_items=source_items or [],
+            related_items=signal_index.source_items_for_cves(threat.related_cves),
+            source_items=source_items,
             ransomware_posts_30d=ransomware_posts_30d,
             local_intrusion_pressure=local_intrusion_pressure,
+            signal_index=signal_index,
         )
 
     def _score_threat(
@@ -213,6 +239,8 @@ class CorrelationEngine:
         source_items: list[SourceItem],
         ransomware_posts_30d: int,
         local_intrusion_pressure: float = 0.0,
+        campaign_active: bool = False,
+        signal_index: PredictionSignalIndex | None = None,
     ) -> ThreatRecord:
         scored = threat.model_copy(deep=True)
         text = " ".join([item.title + " " + item.raw_content for item in related_items])
@@ -252,14 +280,20 @@ class CorrelationEngine:
             if got is not None:
                 epss_score = got
                 break
+        indexed_signal = (
+            signal_index.signal_for_cves(scored.related_cves)
+            if signal_index is not None and scored.related_cves
+            else None
+        )
         ctx = PredictiveContext(
             threat=scored,
             cve=cve,
             kev=kev,
             epss=epss_score,
             source_items=source_items,
+            indexed_signal=indexed_signal,
             suspected_actors=suspected_actors,
-            campaign_active=False,  # set after clustering
+            campaign_active=campaign_active,
             ransomware_claims_last_30d=ransomware_posts_30d,
             sectors_in_play=list(scored.sectors_at_risk),
             local_intrusion_pressure=local_intrusion_pressure,
@@ -287,6 +321,13 @@ class CorrelationEngine:
         self,
         threats: list[ThreatRecord],
         campaigns: list[CampaignCluster],
+        *,
+        cves_by_id: dict[str, CVERecord],
+        kev_by_cve: dict[str, KEVRecord],
+        source_items: list[SourceItem],
+        ransomware_posts_30d: int,
+        local_intrusion_pressure: float,
+        signal_index: PredictionSignalIndex,
     ) -> list[ThreatRecord]:
         membership: dict[str, list[str]] = {}
         for cluster in campaigns:
@@ -300,9 +341,22 @@ class CorrelationEngine:
                 continue
             copy = threat.model_copy(deep=True)
             copy.campaign_ids = ids
+            cve = cves_by_id.get(copy.related_cves[0]) if copy.related_cves else None
+            kev = kev_by_cve.get(copy.related_cves[0]) if copy.related_cves else None
+            copy = self._score_threat(
+                copy,
+                cve=cve,
+                kev=kev,
+                related_items=signal_index.source_items_for_cves(copy.related_cves),
+                source_items=source_items,
+                ransomware_posts_30d=ransomware_posts_30d,
+                local_intrusion_pressure=local_intrusion_pressure,
+                campaign_active=True,
+                signal_index=signal_index,
+            )
+            copy.campaign_ids = ids
             if copy.attack_forecast is not None:
-                # If we are in an active cluster, nudge the forecast slightly
-                # rather than recomputing — recomputation already happened.
+                # Keep the campaign explanation visible after active-campaign scoring.
                 membership_note = "Campaign membership recognized."
                 copy.attack_forecast = copy.attack_forecast.model_copy(
                     update={

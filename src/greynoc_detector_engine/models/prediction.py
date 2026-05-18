@@ -56,6 +56,58 @@ class AttackForecast(BaseModel):
     generated_at: datetime = Field(default_factory=utc_now)
 
 
+class PredictionSignal(BaseModel):
+    """Precomputed source-signal features for one or more related CVEs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cve_ids: list[str] = Field(default_factory=list)
+    source_item_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    source_diversity: int = Field(default=0, ge=0)
+    trusted_source_count: int = Field(default=0, ge=0)
+    cve_mention_count: int = Field(default=0, ge=0)
+    chatter_velocity: float = Field(default=0.0, ge=0.0, le=1.0)
+    raw_items_scanned: int = Field(default=0, ge=0)
+
+
+class PredictionFingerprint(BaseModel):
+    """Input fingerprint used to skip unchanged forecast recomputation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    threat_id: str
+    fingerprint: str
+    model_version: str
+    source_watermark: str
+    reputation_watermark: str
+    config_hash: str
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ForecastRun(BaseModel):
+    """Operational metrics captured for a predictive run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int | None = None
+    started_at: datetime
+    ended_at: datetime
+    duration_seconds: float = Field(ge=0.0)
+    threat_count: int = Field(ge=0)
+    raw_item_count: int = Field(ge=0)
+    skipped_count: int = Field(ge=0)
+    write_count: int = Field(ge=0)
+    model_version: str
+    model_config_hash: str
+    threats_per_second: float = Field(ge=0.0)
+    raw_items_scanned: int = Field(ge=0)
+    forecast_latency_p95: float = Field(ge=0.0)
+    brier_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    precision_at_n: dict[str, float] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class EPSSScore(BaseModel):
     """FIRST.org Exploit Prediction Scoring System point."""
 

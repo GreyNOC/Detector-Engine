@@ -243,8 +243,17 @@ def predict_run(
         readable=True,
         help="Path to a YAML file describing your asset inventory.",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Recompute every forecast even when the stored input fingerprint is unchanged.",
+    ),
 ) -> None:
-    result = run_predict_job(build_storage(get_settings()), asset_inventory_path=asset_inventory)
+    result = run_predict_job(
+        build_storage(get_settings()),
+        asset_inventory_path=asset_inventory,
+        force=force,
+    )
     typer.echo(result.model_dump_json())
 
 

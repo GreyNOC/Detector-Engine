@@ -20,6 +20,7 @@ early_warning_weights:
 predictive_fusion_weights:
   epss_probability: 0.25
   kev_listed: 0.20
+  local_intrusion_pressure: 0.15
   public_exploit_availability: 0.12
   chatter_velocity: 0.10
   ransomware_proximity: 0.08
@@ -37,3 +38,8 @@ labels:
   medium: [40, 69]
   high: [70, 84]
   critical: [85, 100]
+
+calibration:
+  method: bucket
+  blend: 0.25
+  min_bucket_count: 3

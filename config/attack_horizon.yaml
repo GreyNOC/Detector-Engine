@@ -17,6 +17,8 @@ timing_model:
     actor_activity_threshold: 0.5
     actor_activity: 0.02
     active_campaign: 0.03
+    local_intrusion_pressure_threshold: 0.4
+    local_intrusion_pressure: 0.08
 
 horizon_buckets_days:
   imminent_max: 7
