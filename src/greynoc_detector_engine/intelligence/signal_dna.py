@@ -110,11 +110,7 @@ def _signature_terms(threat: ThreatRecord) -> list[str]:
         raw_terms.add(reference.source)
         raw_terms.add(reference.title)
     normalized = sorted(
-        {
-            term.strip().lower()
-            for term in raw_terms
-            if term and len(term.strip()) >= 3
-        }
+        {term.strip().lower() for term in raw_terms if term and len(term.strip()) >= 3}
     )
     return normalized[:25]
 

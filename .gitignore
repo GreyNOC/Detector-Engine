@@ -1,4 +1,5 @@
 .env
+.claude/
 .venv/
 __pycache__/
 *.py[cod]
@@ -6,10 +7,11 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.coverage.*
+pytest-cache-files-*/
 htmlcov/
 dist/
 build/
 *.egg-info/
 data/threat_library/*.sqlite
 data/threat_library/*.sqlite-*
-

@@ -22,6 +22,8 @@ not clone, download, install, import, or execute untrusted code.
 
 ## Current Capabilities
 
+- Version `0.9.0` is the first near-production evaluation release for the
+  defensive detection-engine foundation.
 - Pydantic v2 schemas for CVEs, KEV entries, sources, source runs, indicators,
   threats, detections, validation evidence, score events, and score results.
 - YAML source registry and scoring configuration under `config/`.
@@ -96,6 +98,8 @@ curl http://127.0.0.1:8000/sources
 curl http://127.0.0.1:8000/threats
 curl http://127.0.0.1:8000/ingest/runs
 curl "http://127.0.0.1:8000/detections?status=draft&kind=sigma"
+curl "http://127.0.0.1:8000/exports/detections?status=validated&export_format=json"
+curl "http://127.0.0.1:8000/intelligence/threats/thr-cve-cve-2026-12345/signal-dna"
 curl "http://127.0.0.1:8000/scores/events?target_id=thr-cve-cve-2026-12345&score_type=risk"
 curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" -X POST "http://127.0.0.1:8000/ingest/cve?fixture=cve_sample.json"
 curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" -X POST "http://127.0.0.1:8000/ingest/kev?fixture=kev_sample.json"
@@ -132,6 +136,9 @@ curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" \
 - `GET /kev`
 - `GET /detections`
 - `GET /detections/{detection_id}`
+- `GET /exports/detections`
+- `GET /intelligence/threats/{threat_id}/signal-dna`
+- `GET /intelligence/detections/{detection_id}/quality-passport`
 - `GET /scores/events`
 - `GET /ingest/runs`
 - `POST /ingest/cve`
@@ -142,6 +149,7 @@ curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" \
 - `POST /correlate`
 - `POST /correlate/run`
 - `POST /detections/generate/{threat_id}`
+- `POST /detections/{detection_id}/test`
 - `PATCH /detections/{detection_id}/status`
 
 ## Local Fixture Workflow

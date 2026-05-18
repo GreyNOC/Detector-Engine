@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from greynoc_detector_engine import __version__
 from greynoc_detector_engine.api.routes import (
     cves,
     detections,
@@ -24,7 +25,7 @@ def create_app() -> FastAPI:
     configure_logging(settings.log_level)
     app = FastAPI(
         title="GreyNOC Detection Engine",
-        version="0.1.0",
+        version=__version__,
         description="Defensive threat-intelligence and detection catalog API.",
     )
     app.include_router(health.router)

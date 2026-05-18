@@ -5,7 +5,11 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.detection.testing import DetectionTestReport
-from greynoc_detector_engine.models.detection import DetectionStatus, GeneratedDetection, ValidationResult
+from greynoc_detector_engine.models.detection import (
+    DetectionStatus,
+    GeneratedDetection,
+    ValidationResult,
+)
 
 
 class PassportGrade(StrEnum):
@@ -44,7 +48,9 @@ def build_detection_quality_passport(
     passed = [item for item in evidence if item.result == ValidationResult.PASSED]
     has_reviewer = any(item.reviewer for item in passed)
     has_telemetry = any(item.telemetry_source for item in passed)
-    has_positive_sample = any(item.sample_size is not None and item.sample_size > 0 for item in passed)
+    has_positive_sample = any(
+        item.sample_size is not None and item.sample_size > 0 for item in passed
+    )
     false_positive_total = sum(item.false_positive_count or 0 for item in evidence)
     true_positive_total = sum(item.true_positive_count or 0 for item in evidence)
     precision_ready = bool(test_report and test_report.precision_ready)

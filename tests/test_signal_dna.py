@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from greynoc_detector_engine.intelligence.signal_dna import SignalStrength, build_signal_dna
-from greynoc_detector_engine.models.threat import AIAttackType, ThreatRecord
 from greynoc_detector_engine.models.source import SourceReference
+from greynoc_detector_engine.models.threat import AIAttackType, ThreatRecord
 
 
 def test_signal_dna_builds_stable_fingerprint_and_strength() -> None:
@@ -21,8 +21,16 @@ def test_signal_dna_builds_stable_fingerprint_and_strength() -> None:
                 source="test-source",
                 title="Example advisory",
                 url="https://example.test/advisory",
+                content_hash="abc123",
                 raw_excerpt="AI supply chain context.",
-            )
+            ),
+            SourceReference(
+                source="second-source",
+                title="Second advisory",
+                url="https://example.test/second-advisory",
+                content_hash="def456",
+                raw_excerpt="Additional CVE and AI supply chain context.",
+            ),
         ],
     )
 
@@ -32,5 +40,9 @@ def test_signal_dna_builds_stable_fingerprint_and_strength() -> None:
     assert dna.fingerprint == repeated.fingerprint
     assert dna.fingerprint.startswith("gndna-")
     assert dna.ai_relevance is True
-    assert dna.strength in {SignalStrength.MODERATE, SignalStrength.STRONG, SignalStrength.EXCEPTIONAL}
+    assert dna.strength in {
+        SignalStrength.MODERATE,
+        SignalStrength.STRONG,
+        SignalStrength.EXCEPTIONAL,
+    }
     assert "cve-2026-12345" in dna.signature_terms
