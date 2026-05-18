@@ -9,10 +9,11 @@ from pydantic import BaseModel
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.detection import GeneratedDetection
 from greynoc_detector_engine.models.kev import KEVRecord
-from greynoc_detector_engine.models.scoring import ScoreResult
+from greynoc_detector_engine.models.scoring import ScoreEvent, ScoreResult
 from greynoc_detector_engine.models.source import SourceItem, SourceRun
 from greynoc_detector_engine.models.threat import ThreatRecord
 from greynoc_detector_engine.storage.base import StorageBackend
+from greynoc_detector_engine.utils.time import parse_datetime
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -78,6 +79,8 @@ class SQLiteStorage(StorageBackend):
                     ON source_runs (status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_score_events_target
                     ON score_events (target_id);
+                CREATE INDEX IF NOT EXISTS idx_score_events_type_created
+                    ON score_events (score_type, created_at);
                 """
             )
             self._migrate_source_runs(conn)
@@ -200,6 +203,47 @@ class SQLiteStorage(StorageBackend):
                 """,
                 (target_id, score_type, score.model_dump_json()),
             )
+
+    def list_score_events(
+        self,
+        *,
+        target_id: str | None = None,
+        score_type: str | None = None,
+        limit: int = 100,
+    ) -> list[ScoreEvent]:
+        bounded_limit = max(1, min(limit, 500))
+        conditions: list[str] = []
+        values: list[object] = []
+        if target_id is not None:
+            conditions.append("target_id = ?")
+            values.append(target_id)
+        if score_type is not None:
+            conditions.append("score_type = ?")
+            values.append(score_type)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        sql = (
+            "SELECT score_event_id, target_id, score_type, payload, created_at "
+            f"FROM score_events {where} "
+            "ORDER BY created_at DESC, score_event_id DESC LIMIT ?"
+        )
+        values.append(bounded_limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, values).fetchall()
+        events: list[ScoreEvent] = []
+        for row in rows:
+            created_at = parse_datetime(row["created_at"])
+            if created_at is None:
+                continue
+            events.append(
+                ScoreEvent(
+                    score_event_id=row["score_event_id"],
+                    target_id=row["target_id"],
+                    score_type=row["score_type"],
+                    score=ScoreResult.model_validate_json(row["payload"]),
+                    created_at=created_at,
+                )
+            )
+        return events
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
