@@ -63,7 +63,9 @@ class EPSSClient:
                 EPSSRecord(
                     cve_id=str(cve_id).upper(),
                     epss_score=float(score),
-                    percentile=float(row["percentile"]) if row.get("percentile") is not None else None,
+                    percentile=(
+                        float(row["percentile"]) if row.get("percentile") is not None else None
+                    ),
                 )
             )
         return records

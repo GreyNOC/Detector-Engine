@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
-from greynoc_detector_engine.detection.testing import DetectionFixture, DetectionTestCase, run_detection_test_case
+from greynoc_detector_engine.detection.testing import (
+    DetectionFixture,
+    DetectionTestCase,
+    run_detection_test_case,
+)
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 
 router = APIRouter()

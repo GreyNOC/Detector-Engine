@@ -5,7 +5,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from greynoc_detector_engine.models.detection import DetectionKind, DetectionStatus, GeneratedDetection
+from greynoc_detector_engine.models.detection import (
+    DetectionKind,
+    DetectionStatus,
+    GeneratedDetection,
+)
 
 ExportFormat = Literal["json", "text"]
 

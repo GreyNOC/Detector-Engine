@@ -121,7 +121,7 @@ def _candidate_terms(detection: GeneratedDetection) -> set[str]:
             raw_terms.add(reference.raw_excerpt)
     terms: set[str] = set()
     for raw in raw_terms:
-        for token in raw.replace("\"", " ").replace("'", " ").replace(":", " ").split():
+        for token in raw.replace('"', " ").replace("'", " ").replace(":", " ").split():
             normalized = token.strip("[]{}(),.\\/|*+-_=<>!?").lower()
             if len(normalized) >= 6:
                 terms.add(normalized)

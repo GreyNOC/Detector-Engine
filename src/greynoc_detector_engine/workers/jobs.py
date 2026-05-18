@@ -290,7 +290,9 @@ def _validate_detection_transition(
     evidence_items: list[ValidationEvidence],
 ) -> None:
     if status == DetectionStatus.VALIDATED:
-        passed_evidence = [item for item in evidence_items if item.result == ValidationResult.PASSED]
+        passed_evidence = [
+            item for item in evidence_items if item.result == ValidationResult.PASSED
+        ]
         if not passed_evidence:
             raise DetectionLifecycleError(
                 "Validated detections require at least one passed validation evidence item."
@@ -303,14 +305,18 @@ def _validate_detection_transition(
             raise DetectionLifecycleError(
                 "Validated detections require validation evidence with a reviewer."
             )
-        if not any(item.sample_size is not None and item.sample_size > 0 for item in passed_evidence):
+        if not any(
+            item.sample_size is not None and item.sample_size > 0 for item in passed_evidence
+        ):
             raise DetectionLifecycleError(
                 "Validated detections require validation evidence with a positive sample size."
             )
         return
 
     if status == DetectionStatus.DEPRECATED and not note and not evidence_items:
-        raise DetectionLifecycleError("Deprecated detections require a note or validation evidence.")
+        raise DetectionLifecycleError(
+            "Deprecated detections require a note or validation evidence."
+        )
 
 
 def generate_detections_for_all(storage: StorageBackend) -> JobResult:

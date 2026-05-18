@@ -11,13 +11,7 @@ from greynoc_detector_engine.models.cve import CVERecord
 def test_epss_client_loads_first_api_fixture(tmp_path: Path) -> None:
     fixture = tmp_path / "epss.json"
     fixture.write_text(
-        json.dumps(
-            {
-                "data": [
-                    {"cve": "CVE-2026-12345", "epss": "0.81234", "percentile": "0.99"}
-                ]
-            }
-        ),
+        json.dumps({"data": [{"cve": "CVE-2026-12345", "epss": "0.81234", "percentile": "0.99"}]}),
         encoding="utf-8",
     )
 
