@@ -62,9 +62,10 @@ target.
 **H7. API `fixture` query parameter allowed arbitrary local paths.**
 *Files:* `api/routes/operations.py`, `api/routes/predictions.py`.
 *Risk:* `?fixture=../../../etc/passwd` from any caller reachable to the API.
-*Fix:* `_validate_fixture_path()` resolves the path and requires it to live
-under `settings.data_dir`. A new env knob `GREYNOC_FIXTURE_DIR` widens the
-allowed root for power users.
+*Fix:* API ingest fixture paths resolve relative inputs under
+`settings.fixture_root` and reject paths outside that root. Prediction asset
+inventory paths accept the configured fixture/data roots and the optional
+`GREYNOC_FIXTURE_DIR` compatibility root.
 
 **H8. Mutating API routes could stay open when deployed without an API key.**
 *Files:* `api/dependencies.py`, `docker-compose.yml`, `README.md`.
