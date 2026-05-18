@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Annotated
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
 from greynoc_detector_engine.api.job_locks import single_running_job
-from greynoc_detector_engine.api.pagination import LimitQuery, apply_limit
+from greynoc_detector_engine.api.pagination import LimitParam, apply_limit
 from greynoc_detector_engine.models.detection import (
     DetectionKind,
     DetectionStatus,
@@ -33,7 +31,7 @@ class DetectionStatusUpdateRequest(BaseModel):
 
 @router.get("/detections")
 def list_detections(
-    limit: Annotated[int, LimitQuery],
+    limit: LimitParam,
     status: DetectionStatus | None = Query(default=None),
     kind: DetectionKind | None = Query(default=None),
     threat_id: str | None = Query(default=None),
