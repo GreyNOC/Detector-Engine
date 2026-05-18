@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from greynoc_detector_engine.api.routes import (
     cves,
     detections,
+    exports,
     health,
     kev,
     operations,
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(cves.router)
     app.include_router(kev.router)
     app.include_router(detections.router)
+    app.include_router(exports.router)
     app.include_router(scores.router)
     app.include_router(operations.router)
     return app
