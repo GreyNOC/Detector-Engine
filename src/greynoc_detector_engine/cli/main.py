@@ -238,7 +238,10 @@ def sensor_honeypot(
     allow_external_bind: bool = typer.Option(
         False,
         "--allow-external-bind",
-        help="Required when --bind is not loopback. Use only when intentionally exposing the listener.",
+        help=(
+            "Required when --bind is not loopback. "
+            "Use only when intentionally exposing the listener."
+        ),
     ),
 ) -> None:
     """Run the darknet TCP listener. Every connection is logged + cataloged.
