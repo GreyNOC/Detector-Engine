@@ -83,8 +83,24 @@ weaponized payloads, bypass instructions, or abuse-enabling procedures.
 The preferred shorthand is `gn - <command>`. The `GN - <command>` alias and the
 original `greynoc-detector <command>` entrypoint are also supported.
 
+Install once, then run the offline golden-path demo to exercise the full
+defensive workflow against the bundled fixtures:
+
 ```powershell
 python -m pip install -e .[dev]
+gn - workflow demo --pretty
+```
+
+The demo initializes local paths, ingests every fixture-backed source it can
+find, correlates, predicts, and drafts detections. It runs fully offline and
+prints a compact JSON report of every step plus counts of ingest runs, CVEs,
+KEV entries, raw items, threats, campaigns, forecasts, and draft detections.
+Use this command on a fresh install before pointing the engine at live
+sources.
+
+For step-by-step exploration:
+
+```powershell
 gn - init
 
 # Authoritative + research feeds
@@ -104,6 +120,24 @@ gn - predict run --asset-inventory config/asset_inventory.yaml
 gn - threats list
 gn - predict campaigns
 ```
+
+Local development tips:
+
+- `data/threat_library/*.sqlite` and `data/*.sqlite` are ignored by git;
+  never commit generated DB files. The `workflow demo` test suite confirms
+  the DB stays under a per-test temp dir.
+- `GREYNOC_FETCH_LIVE` defaults to `false`. Live network fetching is opt-in.
+- Run the full validation suite with:
+
+  ```powershell
+  ruff check .
+  ruff format --check .
+  mypy src
+  pytest --cov=greynoc_detector_engine --cov-report=term-missing
+  ```
+
+See `docs/cli_operator_guide.md` for the standard SOC operator workflow and
+`docs/advanced_tool_roadmap.md` for the advanced-vs-future-work boundary.
 
 Run a compact local operator status check:
 
