@@ -171,14 +171,18 @@ class SQLiteStorage(StorageBackend):
                     run_to_store.created_at.isoformat(),
                 ),
             )
-            run_id = int(cursor.lastrowid)
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("SQLite did not return a source run id after insert.")
+            run_id = int(lastrowid)
         return run_to_store.model_copy(update={"run_id": run_id})
 
     def list_source_runs(self, limit: int = 100) -> list[SourceRun]:
         bounded_limit = max(1, min(limit, 500))
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT run_id, payload FROM source_runs ORDER BY created_at DESC, run_id DESC LIMIT ?",
+                "SELECT run_id, payload FROM source_runs "
+                "ORDER BY created_at DESC, run_id DESC LIMIT ?",
                 (bounded_limit,),
             ).fetchall()
         runs: list[SourceRun] = []
@@ -216,7 +220,8 @@ class SQLiteStorage(StorageBackend):
                 conn.execute(f"ALTER TABLE source_runs ADD COLUMN {column} {definition}")
 
         rows = conn.execute(
-            "SELECT run_id, source_id, status, message, created_at FROM source_runs WHERE payload IS NULL"
+            "SELECT run_id, source_id, status, message, created_at "
+            "FROM source_runs WHERE payload IS NULL"
         ).fetchall()
         for row in rows:
             run = SourceRun(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from greynoc_detector_engine.api.dependencies import require_api_key, resolve_fixture_path
@@ -60,5 +60,5 @@ def test_resolve_fixture_path_rejects_path_traversal(settings: Settings, tmp_pat
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPException):
         resolve_fixture_path(str(outside), settings)

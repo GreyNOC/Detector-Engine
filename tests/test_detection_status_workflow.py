@@ -41,9 +41,10 @@ def test_update_detection_status_validates_detection_with_note() -> None:
 
     assert result.status == "ok"
     assert storage.detections["det-test"].status == DetectionStatus.VALIDATED
-    assert "Validated against representative telemetry." in storage.detections[
-        "det-test"
-    ].validation_steps
+    assert (
+        "Validated against representative telemetry."
+        in storage.detections["det-test"].validation_steps
+    )
 
 
 def test_update_detection_status_returns_not_found() -> None:

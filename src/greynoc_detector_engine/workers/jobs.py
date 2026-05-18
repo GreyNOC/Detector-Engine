@@ -16,7 +16,12 @@ from greynoc_detector_engine.ingest.kev import KEVIngestor
 from greynoc_detector_engine.ingest.news import NewsIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
 from greynoc_detector_engine.models.detection import DetectionStatus
-from greynoc_detector_engine.models.source import SourceConfig, SourceRun, SourceRunStatus, SourceType
+from greynoc_detector_engine.models.source import (
+    SourceConfig,
+    SourceRun,
+    SourceRunStatus,
+    SourceType,
+)
 from greynoc_detector_engine.models.threat import ThreatSeverity
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
 from greynoc_detector_engine.scoring.exploitability import ExploitabilityScorer
@@ -235,8 +240,7 @@ def update_detection_status(
     return JobResult(
         job="update-detection-status",
         counts={"detections": 1},
-        messages=[f"Detection {detection_id} moved to {status.value}."]
-        + ([note] if note else []),
+        messages=[f"Detection {detection_id} moved to {status.value}."] + ([note] if note else []),
     )
 
 

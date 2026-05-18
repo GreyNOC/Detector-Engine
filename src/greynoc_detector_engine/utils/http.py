@@ -74,6 +74,4 @@ class DefensiveHttpClient:
         if content_length and int(content_length) > self.max_response_bytes:
             raise HttpFetchError(f"response too large from {url}: {content_length} bytes")
         if len(response.content) > self.max_response_bytes:
-            raise HttpFetchError(
-                f"response too large from {url}: {len(response.content)} bytes"
-            )
+            raise HttpFetchError(f"response too large from {url}: {len(response.content)} bytes")
