@@ -31,18 +31,17 @@ def require_api_key(
     settings: Settings = Depends(get_app_settings),
 ) -> None:
     """Protect mutating API endpoints outside local/dev/test."""
-    expected_secret = settings.api_key
     env_name = settings.env.strip().lower()
-    if expected_secret is None and env_name in _LOCAL_ENVS:
+    expected = settings.api_key.get_secret_value() if settings.api_key is not None else ""
+    if not expected and env_name in _LOCAL_ENVS:
         return
 
-    if expected_secret is None:
+    if not expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="GREYNOC_API_KEY is required outside local/dev/test.",
         )
 
-    expected = expected_secret.get_secret_value()
     provided = request.headers.get("x-greynoc-api-key")
     if not provided or not secrets.compare_digest(provided, expected):
         raise HTTPException(
