@@ -16,9 +16,10 @@ catalogued in a local SQLite-backed library and draft detections (Sigma,
 Splunk SPL, Elastic KQL, Microsoft Defender KQL, YARA, Suricata) are generated
 for SOC validation under an evidence-gated lifecycle.
 
-See `docs/predictive_engine.md`, `docs/osint_layer.md`, and
-`docs/local_network_sensor.md` for the predictive overlay; `docs/security_review.md`
-for the engine's own hardening; and `CHANGELOG.md` for release notes.
+See `docs/predictive_engine.md`, `docs/osint_layer.md`,
+`docs/local_network_sensor.md`, and `docs/cli_operator_guide.md` for the main
+workflows; `docs/security_review.md` for the engine's own hardening; and
+`CHANGELOG.md` for release notes.
 
 ## Safety Boundary
 
@@ -104,16 +105,29 @@ gn - threats list
 gn - predict campaigns
 ```
 
+Run a compact local operator status check:
+
+```powershell
+gn - status --pretty
+```
+
+Run the standard configured ingest sequence:
+
+```powershell
+gn - ingest all --pretty
+```
+
 Show a correlated threat:
 
 ```powershell
 gn - threats show thr-cve-cve-2026-12345
 ```
 
-Generate draft detections after correlation:
+Generate and inspect draft detections after correlation:
 
 ```powershell
 gn - detections generate thr-cve-cve-2026-12345
+gn - detections list --threat-id thr-cve-cve-2026-12345 --summary --pretty
 ```
 
 Run the API:
