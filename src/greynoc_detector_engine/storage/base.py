@@ -7,6 +7,7 @@ from greynoc_detector_engine.models.asset import AssetRecord, TargetLikelihood
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.detection import GeneratedDetection
 from greynoc_detector_engine.models.feedback import ThreatFeedback
+from greynoc_detector_engine.models.job import JobHistoryEntry
 from greynoc_detector_engine.models.kev import KEVRecord
 from greynoc_detector_engine.models.network import (
     HoneypotEvent,
@@ -133,3 +134,14 @@ class StorageBackend(Protocol):
     ) -> None: ...
 
     def list_forecast_outcomes(self) -> list[dict[str, object]]: ...
+
+    def upsert_job_history(self, entry: JobHistoryEntry) -> None: ...
+
+    def list_job_history(
+        self,
+        *,
+        job_type: str | None = None,
+        limit: int = 100,
+    ) -> list[JobHistoryEntry]: ...
+
+    def get_job_history(self, job_id: str) -> JobHistoryEntry | None: ...

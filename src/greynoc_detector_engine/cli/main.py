@@ -20,6 +20,7 @@ from greynoc_detector_engine.workers.jobs import (
     build_storage,
     generate_detections_for_threat,
     initialize_project,
+    record_job,
     run_correlation_job,
     run_ingest_job,
     run_predict_job,
@@ -51,6 +52,7 @@ feedback_app = typer.Typer(help="Submit analyst feedback that re-tunes predictiv
 export_app = typer.Typer(help="Export the threat library to STIX 2.1 or ATT&CK Navigator.")
 doctor_app = typer.Typer(help="Engine self-diagnostic: safety defaults + source health.")
 workflow_app = typer.Typer(help="Repeatable operator workflows (golden path demo, etc.).")
+jobs_app = typer.Typer(help="Inspect orchestrated worker job history.")
 
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(threats_app, name="threats")
@@ -62,6 +64,7 @@ app.add_typer(feedback_app, name="feedback")
 app.add_typer(export_app, name="export")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(workflow_app, name="workflow")
+app.add_typer(jobs_app, name="jobs")
 
 
 @app.callback()
@@ -74,6 +77,34 @@ def main() -> None:
 def init_command() -> None:
     result = initialize_project(get_settings())
     typer.echo(result.model_dump_json())
+
+
+@jobs_app.command("list")
+def jobs_list(
+    job_type: str | None = typer.Option(
+        None, "--job-type", help="Filter by job type (e.g. ingest:cve)."
+    ),
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List recent job-history entries (most recent first)."""
+    storage = build_storage(get_settings())
+    entries = storage.list_job_history(job_type=job_type, limit=limit)
+    _emit_json([entry.model_dump(mode="json") for entry in entries], pretty=pretty)
+
+
+@jobs_app.command("show")
+def jobs_show(
+    job_id: str,
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show one job-history entry by job_id."""
+    storage = build_storage(get_settings())
+    entry = storage.get_job_history(job_id)
+    if entry is None:
+        typer.echo(f"Job not found: {job_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(entry.model_dump(mode="json"), pretty=pretty)
 
 
 @workflow_app.command("demo")
@@ -245,7 +276,10 @@ def ingest_all(
     failed = False
     for source in sources:
         try:
-            result = run_ingest_job(source=source, settings=settings, storage=storage)
+            with record_job(storage, f"ingest:{source}") as summary:
+                result = run_ingest_job(source=source, settings=settings, storage=storage)
+                summary.update(result.counts)
+                summary["status"] = result.status
             results.append(result.model_dump(mode="json"))
         except Exception as exc:
             failed = True
@@ -262,15 +296,19 @@ def ingest_all(
 def correlate_command(
     ransomware_posts_30d: int = typer.Option(0, "--ransomware-posts-30d"),
 ) -> None:
-    result = run_correlation_job(
-        build_storage(get_settings()), ransomware_posts_30d=ransomware_posts_30d
-    )
+    storage = build_storage(get_settings())
+    with record_job(storage, "correlate") as summary:
+        result = run_correlation_job(storage, ransomware_posts_30d=ransomware_posts_30d)
+        summary.update(result.counts)
     typer.echo(result.model_dump_json())
 
 
 @app.command("score")
 def score_command() -> None:
-    result = run_score_job(build_storage(get_settings()))
+    storage = build_storage(get_settings())
+    with record_job(storage, "score") as summary:
+        result = run_score_job(storage)
+        summary.update(result.counts)
     typer.echo(result.model_dump_json())
 
 
@@ -284,7 +322,10 @@ def predict_run(
         help="Path to a YAML file describing your asset inventory.",
     ),
 ) -> None:
-    result = run_predict_job(build_storage(get_settings()), asset_inventory_path=asset_inventory)
+    storage = build_storage(get_settings())
+    with record_job(storage, "predict") as summary:
+        result = run_predict_job(storage, asset_inventory_path=asset_inventory)
+        summary.update(result.counts)
     typer.echo(result.model_dump_json())
 
 
@@ -914,12 +955,15 @@ def _run_ingest(source: IngestCliSource, fixture: Path | None) -> None:
     settings = get_settings()
     storage = build_storage(settings)
     try:
-        result = run_ingest_job(
-            source=source,
-            settings=settings,
-            storage=storage,
-            fixture_path=fixture,
-        )
+        with record_job(storage, f"ingest:{source}") as summary:
+            result = run_ingest_job(
+                source=source,
+                settings=settings,
+                storage=storage,
+                fixture_path=fixture,
+            )
+            summary.update(result.counts)
+            summary["status"] = result.status
     except IngestSourceUnavailable as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(result.model_dump_json())

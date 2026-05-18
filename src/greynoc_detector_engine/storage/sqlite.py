@@ -11,6 +11,7 @@ from greynoc_detector_engine.models.asset import AssetRecord, TargetLikelihood
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.detection import GeneratedDetection
 from greynoc_detector_engine.models.feedback import ThreatFeedback
+from greynoc_detector_engine.models.job import JobHistoryEntry
 from greynoc_detector_engine.models.kev import KEVRecord
 from greynoc_detector_engine.models.network import (
     HoneypotEvent,
@@ -527,6 +528,64 @@ class SQLiteStorage(StorageBackend):
                 "FROM forecast_outcomes ORDER BY verified_at DESC"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    # -- job history --------------------------------------------------------
+
+    def upsert_job_history(self, entry: JobHistoryEntry) -> None:
+        finished_at = entry.finished_at.isoformat() if entry.finished_at is not None else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO job_history
+                    (job_id, job_type, status, started_at, finished_at, error, payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE
+                  SET status=excluded.status,
+                      finished_at=excluded.finished_at,
+                      error=excluded.error,
+                      payload=excluded.payload
+                """,
+                (
+                    entry.job_id,
+                    entry.job_type,
+                    entry.status.value,
+                    entry.started_at.isoformat(),
+                    finished_at,
+                    entry.error,
+                    entry.model_dump_json(),
+                ),
+            )
+
+    def list_job_history(
+        self,
+        *,
+        job_type: str | None = None,
+        limit: int = 100,
+    ) -> list[JobHistoryEntry]:
+        bounded_limit = max(1, min(limit, 500))
+        conditions: list[str] = []
+        values: list[object] = []
+        if job_type is not None:
+            conditions.append("job_type = ?")
+            values.append(job_type)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        sql = (
+            f"SELECT payload FROM job_history {where} ORDER BY started_at DESC, job_id DESC LIMIT ?"
+        )
+        values.append(bounded_limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, values).fetchall()
+        return [JobHistoryEntry.model_validate_json(row["payload"]) for row in rows]
+
+    def get_job_history(self, job_id: str) -> JobHistoryEntry | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM job_history WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return JobHistoryEntry.model_validate_json(row["payload"])
 
     def record_score_event(self, target_id: str, score_type: str, score: ScoreResult) -> None:
         with self._connect() as conn:

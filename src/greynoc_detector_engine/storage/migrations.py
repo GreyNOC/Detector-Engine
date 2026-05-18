@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_USER_VERSION = 4
+CURRENT_USER_VERSION = 5
 
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
@@ -71,6 +71,22 @@ _MIGRATIONS: dict[int, list[str]] = {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_threat ON forecast_outcomes (threat_id);",
+    ],
+    5: [
+        # Lightweight job history. One row per orchestrated worker run.
+        """
+        CREATE TABLE IF NOT EXISTS job_history (
+            job_id TEXT PRIMARY KEY,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            error TEXT,
+            payload TEXT NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_job_history_type ON job_history (job_type);",
+        ("CREATE INDEX IF NOT EXISTS idx_job_history_started ON job_history (started_at);"),
     ],
 }
 

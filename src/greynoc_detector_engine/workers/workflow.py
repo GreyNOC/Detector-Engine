@@ -19,6 +19,7 @@ from greynoc_detector_engine.workers.jobs import (
     build_storage,
     generate_detections_for_all,
     initialize_project,
+    record_job,
     run_correlation_job,
     run_ingest_job,
     run_predict_job,
@@ -78,7 +79,9 @@ def run_workflow_demo(
     steps: list[WorkflowStepResult] = []
     failures = 0
 
-    init_result = initialize_project(settings)
+    with record_job(storage, "workflow:init") as init_summary:
+        init_result = initialize_project(settings)
+        init_summary.update(init_result.counts)
     steps.append(
         WorkflowStepResult(
             step="init",
@@ -99,12 +102,15 @@ def run_workflow_demo(
             )
             continue
         try:
-            ingest_result = run_ingest_job(
-                source=source,
-                settings=settings,
-                storage=storage,
-                fixture_path=fixture_path,
-            )
+            with record_job(storage, f"ingest:{source}") as ingest_summary:
+                ingest_result = run_ingest_job(
+                    source=source,
+                    settings=settings,
+                    storage=storage,
+                    fixture_path=fixture_path,
+                )
+                ingest_summary.update(ingest_result.counts)
+                ingest_summary["status"] = ingest_result.status
             steps.append(
                 WorkflowStepResult(
                     step=f"ingest:{source}",
@@ -124,7 +130,9 @@ def run_workflow_demo(
             )
 
     try:
-        correlation_result = run_correlation_job(storage)
+        with record_job(storage, "correlate") as correlate_summary:
+            correlation_result = run_correlation_job(storage)
+            correlate_summary.update(correlation_result.counts)
         steps.append(
             WorkflowStepResult(
                 step="correlate",
@@ -137,7 +145,9 @@ def run_workflow_demo(
         steps.append(WorkflowStepResult(step="correlate", status="failed", message=str(exc)))
 
     try:
-        predict_result = run_predict_job(storage)
+        with record_job(storage, "predict") as predict_summary:
+            predict_result = run_predict_job(storage)
+            predict_summary.update(predict_result.counts)
         steps.append(
             WorkflowStepResult(
                 step="predict",
@@ -151,7 +161,9 @@ def run_workflow_demo(
 
     if generate_detections:
         try:
-            detection_result = generate_detections_for_all(storage)
+            with record_job(storage, "generate-detections") as detection_summary:
+                detection_result = generate_detections_for_all(storage)
+                detection_summary.update(detection_result.counts)
             steps.append(
                 WorkflowStepResult(
                     step="generate-detections",
