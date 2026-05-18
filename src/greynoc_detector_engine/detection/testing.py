@@ -83,7 +83,7 @@ def _evaluate_fixture(
 ) -> DetectionFixtureResult:
     matched = _simple_text_match(detection, fixture.text)
     expected_match = fixture.expectation == DetectionFixtureExpectation.SHOULD_MATCH
-    passed = matched is expected_match
+    passed = matched == expected_match
     reason = (
         "Fixture matched as expected."
         if passed and expected_match
@@ -109,7 +109,7 @@ def _simple_text_match(detection: GeneratedDetection, text: str) -> bool:
 
 
 def _candidate_terms(detection: GeneratedDetection) -> set[str]:
-    raw_terms = set()
+    raw_terms: set[str] = set()
     raw_terms.add(detection.related_threat_id)
     raw_terms.add(detection.title)
     raw_terms.add(detection.description)
