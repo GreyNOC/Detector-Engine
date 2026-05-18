@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
-from greynoc_detector_engine.models.detection import DetectionStatus
+from greynoc_detector_engine.models.detection import (
+    DetectionKind,
+    DetectionStatus,
+    ValidationEvidence,
+)
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import (
     generate_detections_for_threat,
@@ -19,11 +23,24 @@ class DetectionStatusUpdateRequest(BaseModel):
 
     status: DetectionStatus
     note: str | None = Field(default=None, max_length=1000)
+    evidence: ValidationEvidence | None = None
 
 
 @router.get("/detections")
-def list_detections(storage: SQLiteStorage = Depends(get_storage)) -> list[dict[str, object]]:
-    return [record.model_dump(mode="json") for record in storage.list_detections()]
+def list_detections(
+    status: DetectionStatus | None = Query(default=None),
+    kind: DetectionKind | None = Query(default=None),
+    threat_id: str | None = Query(default=None),
+    storage: SQLiteStorage = Depends(get_storage),
+) -> list[dict[str, object]]:
+    records = storage.list_detections()
+    if status is not None:
+        records = [record for record in records if record.status == status]
+    if kind is not None:
+        records = [record for record in records if record.kind == kind]
+    if threat_id is not None:
+        records = [record for record in records if record.related_threat_id == threat_id]
+    return [record.model_dump(mode="json") for record in records]
 
 
 @router.get("/detections/{detection_id}")
@@ -59,6 +76,7 @@ def set_detection_status(
         detection_id,
         request.status,
         note=request.note,
+        evidence=request.evidence,
     )
     if result.status == "not_found":
         raise HTTPException(status_code=404, detail="Detection not found")
