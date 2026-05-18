@@ -11,6 +11,7 @@ from greynoc_detector_engine.models.detection import (
 )
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import (
+    DetectionLifecycleError,
     generate_detections_for_threat,
     update_detection_status,
 )
@@ -71,13 +72,16 @@ def set_detection_status(
     request: DetectionStatusUpdateRequest,
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
-    result = update_detection_status(
-        storage,
-        detection_id,
-        request.status,
-        note=request.note,
-        evidence=request.evidence,
-    )
+    try:
+        result = update_detection_status(
+            storage,
+            detection_id,
+            request.status,
+            note=request.note,
+            evidence=request.evidence,
+        )
+    except DetectionLifecycleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if result.status == "not_found":
         raise HTTPException(status_code=404, detail="Detection not found")
     return result.model_dump(mode="json")
