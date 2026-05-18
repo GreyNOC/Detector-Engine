@@ -117,6 +117,7 @@ gn - ingest ransomwatch --fixture data/fixtures/ransomwatch_sample.json
 # Correlate + predict (forecasts are computed inline)
 gn - correlate
 gn - predict run --asset-inventory config/asset_inventory.yaml
+gn - predict run --force
 gn - threats list
 gn - predict campaigns
 ```
@@ -411,6 +412,9 @@ healthcheck.
   planned extension.
 - The predictive horizon model is parametric and hand-tuned; the same feature
   contract supports swapping in a learned model later.
+- Prediction runs record `ForecastRun` performance metrics and skip unchanged
+  threats by input fingerprint; use `gn - predict run --force` for a full
+  recompute.
 
 ## Roadmap
 

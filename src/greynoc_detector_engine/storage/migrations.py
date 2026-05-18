@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_USER_VERSION = 5
+CURRENT_USER_VERSION = 6
 
 _MIGRATIONS: dict[int, list[str]] = {
     1: [
@@ -73,6 +73,41 @@ _MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_threat ON forecast_outcomes (threat_id);",
     ],
     5: [
+        """
+        CREATE TABLE IF NOT EXISTS forecast_runs (
+            run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payload TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL,
+            model_version TEXT NOT NULL
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prediction_fingerprints (
+            threat_id TEXT PRIMARY KEY,
+            fingerprint TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """,
+        (
+            "DELETE FROM target_likelihoods "
+            "WHERE likelihood_id NOT IN ("
+            "SELECT MAX(likelihood_id) FROM target_likelihoods GROUP BY asset_id, threat_id"
+            ");"
+        ),
+        (
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_target_likelihoods_asset_threat "
+            "ON target_likelihoods (asset_id, threat_id);"
+        ),
+        "CREATE INDEX IF NOT EXISTS idx_forecast_runs_started ON forecast_runs (started_at);",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_prediction_fingerprints_model "
+            "ON prediction_fingerprints (model_version);"
+        ),
+    ],
+    6: [
         # Lightweight job history. One row per orchestrated worker run.
         """
         CREATE TABLE IF NOT EXISTS job_history (
@@ -86,7 +121,7 @@ _MIGRATIONS: dict[int, list[str]] = {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_job_history_type ON job_history (job_type);",
-        ("CREATE INDEX IF NOT EXISTS idx_job_history_started ON job_history (started_at);"),
+        "CREATE INDEX IF NOT EXISTS idx_job_history_started ON job_history (started_at);",
     ],
 }
 

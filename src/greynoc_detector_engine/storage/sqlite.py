@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypeVar
 
@@ -23,6 +24,8 @@ from greynoc_detector_engine.models.prediction import (
     AttackForecast,
     CampaignCluster,
     EPSSScore,
+    ForecastRun,
+    PredictionFingerprint,
 )
 from greynoc_detector_engine.models.scoring import ScoreEvent, ScoreResult
 from greynoc_detector_engine.models.source import SourceItem, SourceRun
@@ -115,6 +118,20 @@ class SQLiteStorage(StorageBackend):
                     threat_id TEXT NOT NULL,
                     payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS forecast_runs (
+                    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    payload TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    model_version TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS prediction_fingerprints (
+                    threat_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS network_devices (
                     device_id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
@@ -155,6 +172,10 @@ class SQLiteStorage(StorageBackend):
                     ON attack_forecasts (threat_id);
                 CREATE INDEX IF NOT EXISTS idx_target_likelihoods_threat
                     ON target_likelihoods (threat_id);
+                CREATE INDEX IF NOT EXISTS idx_forecast_runs_started
+                    ON forecast_runs (started_at);
+                CREATE INDEX IF NOT EXISTS idx_prediction_fingerprints_model
+                    ON prediction_fingerprints (model_version);
                 CREATE INDEX IF NOT EXISTS idx_ics_observations_device
                     ON ics_observations (device_id);
                 CREATE INDEX IF NOT EXISTS idx_intrusion_signals_kind
@@ -196,6 +217,20 @@ class SQLiteStorage(StorageBackend):
     def list_threats(self) -> list[ThreatRecord]:
         return self._list("threats", ThreatRecord)
 
+    def iter_threats(self, batch_size: int = 500) -> Iterator[list[ThreatRecord]]:
+        bounded_batch = max(1, min(batch_size, 5000))
+        offset = 0
+        while True:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT payload FROM threats ORDER BY threat_id LIMIT ? OFFSET ?",
+                    (bounded_batch, offset),
+                ).fetchall()
+            if not rows:
+                break
+            yield [ThreatRecord.model_validate_json(row["payload"]) for row in rows]
+            offset += bounded_batch
+
     def get_threat(self, threat_id: str) -> ThreatRecord | None:
         return self._get("threats", "threat_id", threat_id, ThreatRecord)
 
@@ -225,6 +260,19 @@ class SQLiteStorage(StorageBackend):
 
     def list_raw_items(self) -> list[SourceItem]:
         return self._list("raw_items", SourceItem)
+
+    def list_raw_items_for_cves(self, cve_ids: list[str]) -> list[SourceItem]:
+        normalized = sorted({cve_id.upper() for cve_id in cve_ids})
+        if not normalized:
+            return []
+        conditions = " OR ".join("payload LIKE ?" for _ in normalized)
+        values = [f"%{cve_id}%" for cve_id in normalized]
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT payload FROM raw_items WHERE {conditions}",
+                values,
+            ).fetchall()
+        return [SourceItem.model_validate_json(row["payload"]) for row in rows]
 
     def upsert_source_item(self, record: SourceItem) -> None:
         self.upsert_raw_item(record)
@@ -317,6 +365,85 @@ class SQLiteStorage(StorageBackend):
             ).fetchall()
         return [AttackForecast.model_validate_json(row["payload"]) for row in rows]
 
+    def get_latest_forecast_for_threat(self, threat_id: str) -> AttackForecast | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM attack_forecasts WHERE threat_id = ? "
+                "ORDER BY generated_at DESC, forecast_id DESC LIMIT 1",
+                (threat_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return AttackForecast.model_validate_json(row["payload"])
+
+    def record_forecast_run(self, run: ForecastRun) -> ForecastRun:
+        run_to_store = run.model_copy(update={"run_id": None})
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO forecast_runs (payload, started_at, ended_at, model_version)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    run_to_store.model_dump_json(),
+                    run_to_store.started_at.isoformat(),
+                    run_to_store.ended_at.isoformat(),
+                    run_to_store.model_version,
+                ),
+            )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("SQLite did not return a forecast run id after insert.")
+            run_id = int(lastrowid)
+        return run_to_store.model_copy(update={"run_id": run_id})
+
+    def list_forecast_runs(self, limit: int = 100) -> list[ForecastRun]:
+        bounded_limit = max(1, min(limit, 500))
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT run_id, payload FROM forecast_runs "
+                "ORDER BY started_at DESC, run_id DESC LIMIT ?",
+                (bounded_limit,),
+            ).fetchall()
+        out: list[ForecastRun] = []
+        for row in rows:
+            run = ForecastRun.model_validate_json(row["payload"])
+            out.append(run.model_copy(update={"run_id": row["run_id"]}))
+        return out
+
+    def get_prediction_fingerprint(self, threat_id: str) -> PredictionFingerprint | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM prediction_fingerprints WHERE threat_id = ?",
+                (threat_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return PredictionFingerprint.model_validate_json(row["payload"])
+
+    def upsert_prediction_fingerprint(self, fingerprint: PredictionFingerprint) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO prediction_fingerprints (
+                    threat_id, fingerprint, model_version, payload, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(threat_id) DO UPDATE
+                  SET fingerprint=excluded.fingerprint,
+                      model_version=excluded.model_version,
+                      payload=excluded.payload,
+                      updated_at=excluded.updated_at
+                """,
+                (
+                    fingerprint.threat_id,
+                    fingerprint.fingerprint,
+                    fingerprint.model_version,
+                    fingerprint.model_dump_json(),
+                    fingerprint.updated_at.isoformat(),
+                ),
+            )
+
     def upsert_indicator_reputation(self, reputation: IndicatorReputation) -> None:
         key = f"{reputation.type.value}:{reputation.value.lower()}"
         with self._connect() as conn:
@@ -346,6 +473,7 @@ class SQLiteStorage(StorageBackend):
                 """
                 INSERT INTO target_likelihoods (asset_id, threat_id, payload)
                 VALUES (?, ?, ?)
+                ON CONFLICT(asset_id, threat_id) DO UPDATE SET payload=excluded.payload
                 """,
                 (likelihood.asset_id, likelihood.threat_id, likelihood.model_dump_json()),
             )
@@ -357,6 +485,77 @@ class SQLiteStorage(StorageBackend):
                 (threat_id,),
             ).fetchall()
         return [TargetLikelihood.model_validate_json(row["payload"]) for row in rows]
+
+    def record_prediction_batch(
+        self,
+        *,
+        threats: list[ThreatRecord],
+        forecasts: list[tuple[str, AttackForecast]],
+        score_events: list[tuple[str, str, ScoreResult]],
+        target_likelihoods: list[TargetLikelihood],
+        fingerprints: list[PredictionFingerprint],
+    ) -> None:
+        with self._connect() as conn:
+            for threat in threats:
+                conn.execute(
+                    """
+                    INSERT INTO threats (threat_id, title, payload)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(threat_id) DO UPDATE
+                      SET title=excluded.title, payload=excluded.payload
+                    """,
+                    (threat.threat_id, threat.title, threat.model_dump_json()),
+                )
+            for threat_id, forecast in forecasts:
+                conn.execute(
+                    """
+                    INSERT INTO attack_forecasts (threat_id, payload, generated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (threat_id, forecast.model_dump_json(), forecast.generated_at.isoformat()),
+                )
+            for target_id, score_type, score in score_events:
+                conn.execute(
+                    """
+                    INSERT INTO score_events (target_id, score_type, payload, created_at)
+                    VALUES (?, ?, ?, datetime('now'))
+                    """,
+                    (target_id, score_type, score.model_dump_json()),
+                )
+            for likelihood in target_likelihoods:
+                conn.execute(
+                    """
+                    INSERT INTO target_likelihoods (asset_id, threat_id, payload)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(asset_id, threat_id) DO UPDATE SET payload=excluded.payload
+                    """,
+                    (
+                        likelihood.asset_id,
+                        likelihood.threat_id,
+                        likelihood.model_dump_json(),
+                    ),
+                )
+            for fingerprint in fingerprints:
+                conn.execute(
+                    """
+                    INSERT INTO prediction_fingerprints (
+                        threat_id, fingerprint, model_version, payload, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(threat_id) DO UPDATE
+                      SET fingerprint=excluded.fingerprint,
+                          model_version=excluded.model_version,
+                          payload=excluded.payload,
+                          updated_at=excluded.updated_at
+                    """,
+                    (
+                        fingerprint.threat_id,
+                        fingerprint.fingerprint,
+                        fingerprint.model_version,
+                        fingerprint.model_dump_json(),
+                        fingerprint.updated_at.isoformat(),
+                    ),
+                )
 
     # -- network / ICS / spacestation ---------------------------------------
 

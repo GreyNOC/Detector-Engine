@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,7 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.analysis.correlation import CorrelationEngine
 from greynoc_detector_engine.catalog.threat_library import ThreatLibrary
-from greynoc_detector_engine.config.settings import Settings, load_source_registry
+from greynoc_detector_engine.config.settings import (
+    Settings,
+    load_attack_horizon_config,
+    load_scoring_config,
+    load_source_registry,
+)
 from greynoc_detector_engine.config.source_registry import SourceRegistry
 from greynoc_detector_engine.detection.generators import DetectionGeneratorSuite
 from greynoc_detector_engine.enrich.asset_context import AssetInventory, TargetLikelihoodScorer
@@ -32,6 +38,7 @@ from greynoc_detector_engine.models.detection import (
     ValidationResult,
 )
 from greynoc_detector_engine.models.job import JobHistoryEntry, JobStatus
+from greynoc_detector_engine.models.prediction import ForecastRun
 from greynoc_detector_engine.models.source import (
     SourceConfig,
     SourceRun,
@@ -39,6 +46,14 @@ from greynoc_detector_engine.models.source import (
     SourceType,
 )
 from greynoc_detector_engine.models.threat import ThreatSeverity
+from greynoc_detector_engine.prediction.accuracy import compute_accuracy
+from greynoc_detector_engine.prediction.attack_forecast import AttackForecaster
+from greynoc_detector_engine.prediction.calibration import ProbabilityCalibrator, precision_at_n
+from greynoc_detector_engine.prediction.fingerprint import (
+    build_prediction_fingerprint,
+    reputation_watermark,
+)
+from greynoc_detector_engine.prediction.signal_index import PredictionSignalIndex
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
 from greynoc_detector_engine.scoring.exploitability import ExploitabilityScorer
 from greynoc_detector_engine.scoring.risk import RiskScorer
@@ -348,6 +363,7 @@ def run_predict_job(
     storage: SQLiteStorage,
     *,
     asset_inventory_path: Path | None = None,
+    force: bool = False,
 ) -> JobResult:
     """Run only the predictive layer over existing threats and write forecasts.
 
@@ -356,46 +372,161 @@ def run_predict_job(
     and optionally writes per-asset target likelihoods if an inventory is given.
     """
 
+    started_at = utc_now()
+    started_perf = time.perf_counter()
+
+    epss_scores = storage.list_epss()
     epss = EPSSEnricher()
-    epss.load(storage.list_epss())
+    epss.load(epss_scores)
     reputation = IndicatorReputationEngine()
-    for rep in storage.list_indicator_reputation():
+    reputations = storage.list_indicator_reputation()
+    for rep in reputations:
         reputation.upsert(rep)
     engine = CorrelationEngine(reputation=reputation, epss_enricher=epss)
+    outcomes = storage.list_forecast_outcomes()
+    scoring_config = load_scoring_config()
+    horizon_config = load_attack_horizon_config()
+    calibration_config = scoring_config.get("calibration", {})
+    if not isinstance(calibration_config, dict):
+        calibration_config = {}
+    calibrator = ProbabilityCalibrator.from_outcomes(
+        outcomes,
+        blend=float(calibration_config.get("blend", 0.25)),
+        min_bucket_count=int(calibration_config.get("min_bucket_count", 3)),
+    )
+    engine.forecaster = AttackForecaster.from_config(
+        scoring_config=scoring_config,
+        horizon_config=horizon_config,
+        feature_builder=engine.feature_builder,
+        calibration=calibrator,
+    )
 
-    threats_in = storage.list_threats()
     cves = {c.cve_id: c for c in storage.list_cves()}
     kev_entries = {k.cve_id: k for k in storage.list_kev()}
     source_items = storage.list_raw_items()
+    signal_index = PredictionSignalIndex.build(source_items)
+    source_watermark = signal_index.source_watermark
+    reputation_hash = reputation_watermark(reputations)
 
     inventory = AssetInventory.from_yaml(asset_inventory_path) if asset_inventory_path else None
     likelihood_scorer = TargetLikelihoodScorer()
 
     forecast_count = 0
     likelihood_count = 0
-    for threat in threats_in:
-        cve = cves.get(threat.related_cves[0]) if threat.related_cves else None
-        kev = kev_entries.get(threat.related_cves[0]) if threat.related_cves else None
-        rescored = engine.rescore(
-            threat,
-            cve=cve,
-            kev=kev,
-            source_items=source_items,
-        )
-        storage.upsert_threat(rescored)
-        if rescored.attack_forecast is not None:
-            storage.record_attack_forecast(rescored.threat_id, rescored.attack_forecast)
-            forecast_count += 1
-        if rescored.predictive_score is not None:
-            storage.record_score_event(rescored.threat_id, "predictive", rescored.predictive_score)
-        if inventory:
-            matches = inventory.match_threat(rescored)
-            for likelihood in likelihood_scorer.score(rescored, matches):
-                storage.record_target_likelihood(likelihood)
-                likelihood_count += 1
+    skipped_count = 0
+    raw_items_scanned = signal_index.raw_items_scanned
+    forecast_latencies: list[float] = []
+    threats_to_store = []
+    forecasts_to_store = []
+    score_events_to_store = []
+    likelihoods_to_store = []
+    fingerprints_to_store = []
+    threat_count = 0
+
+    for batch in storage.iter_threats():
+        for threat in batch:
+            threat_count += 1
+            cve = cves.get(threat.related_cves[0]) if threat.related_cves else None
+            kev = kev_entries.get(threat.related_cves[0]) if threat.related_cves else None
+            epss_score = None
+            for cve_id in threat.related_cves:
+                got = epss.for_cve(cve_id)
+                if got is not None:
+                    epss_score = got
+                    break
+            fingerprint = build_prediction_fingerprint(
+                threat=threat,
+                cve=cve,
+                kev=kev,
+                epss=epss_score,
+                source_watermark=source_watermark,
+                reputation_watermark_value=reputation_hash,
+                model_version=engine.forecaster.model_version,
+                config_hash=engine.forecaster.config_hash,
+            )
+            previous = storage.get_prediction_fingerprint(threat.threat_id)
+            if (
+                not force
+                and previous is not None
+                and previous.fingerprint == fingerprint.fingerprint
+            ):
+                skipped_count += 1
+                continue
+
+            forecast_started = time.perf_counter()
+            rescored = engine.rescore(
+                threat,
+                cve=cve,
+                kev=kev,
+                source_items=source_items,
+                signal_index=signal_index,
+            )
+            forecast_latencies.append(time.perf_counter() - forecast_started)
+            threats_to_store.append(rescored)
+            fingerprints_to_store.append(fingerprint)
+            if rescored.attack_forecast is not None:
+                forecasts_to_store.append((rescored.threat_id, rescored.attack_forecast))
+                forecast_count += 1
+            if rescored.predictive_score is not None:
+                score_events_to_store.append(
+                    (rescored.threat_id, "predictive", rescored.predictive_score)
+                )
+            if inventory:
+                matches = inventory.match_threat(rescored)
+                for likelihood in likelihood_scorer.score(rescored, matches):
+                    likelihoods_to_store.append(likelihood)
+                    likelihood_count += 1
+    storage.record_prediction_batch(
+        threats=threats_to_store,
+        forecasts=forecasts_to_store,
+        score_events=score_events_to_store,
+        target_likelihoods=likelihoods_to_store,
+        fingerprints=fingerprints_to_store,
+    )
+    write_count = (
+        len(threats_to_store)
+        + len(forecasts_to_store)
+        + len(score_events_to_store)
+        + len(likelihoods_to_store)
+        + len(fingerprints_to_store)
+    )
+
+    ended_at = utc_now()
+    duration = max(0.0, time.perf_counter() - started_perf)
+    sorted_latencies = sorted(forecast_latencies)
+    p95_index = int(0.95 * (len(sorted_latencies) - 1)) if sorted_latencies else 0
+    accuracy = compute_accuracy(outcomes)
+    run = ForecastRun(
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_seconds=round(duration, 6),
+        threat_count=threat_count,
+        raw_item_count=len(source_items),
+        skipped_count=skipped_count,
+        write_count=write_count,
+        model_version=engine.forecaster.model_version,
+        model_config_hash=engine.forecaster.config_hash,
+        threats_per_second=round(threat_count / duration, 4) if duration > 0 else 0.0,
+        raw_items_scanned=raw_items_scanned,
+        forecast_latency_p95=round(sorted_latencies[p95_index], 6) if sorted_latencies else 0.0,
+        brier_score=round(accuracy.brier_score, 6),
+        precision_at_n={key: round(value, 6) for key, value in precision_at_n(outcomes).items()},
+    )
+    stored_run = storage.record_forecast_run(run)
     return JobResult(
         job="predict",
-        counts={"forecasts": forecast_count, "target_likelihoods": likelihood_count},
+        counts={
+            "forecasts": forecast_count,
+            "target_likelihoods": likelihood_count,
+            "skipped": skipped_count,
+            "writes": write_count,
+            "forecast_run_id": stored_run.run_id or 0,
+        },
+        messages=[
+            f"Forecast run {stored_run.run_id} used {engine.forecaster.model_version}.",
+            f"Threats/sec {run.threats_per_second:.2f}; p95 latency "
+            f"{run.forecast_latency_p95:.4f}s.",
+        ],
     )
 
 

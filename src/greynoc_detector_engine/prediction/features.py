@@ -13,7 +13,7 @@ from greynoc_detector_engine.enrich.reputation import (
 from greynoc_detector_engine.enrich.threat_actor import ThreatActorAttributor
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.kev import KEVRecord
-from greynoc_detector_engine.models.prediction import EPSSScore
+from greynoc_detector_engine.models.prediction import EPSSScore, PredictionSignal
 from greynoc_detector_engine.models.source import SourceItem
 from greynoc_detector_engine.models.threat import ThreatRecord
 from greynoc_detector_engine.utils.time import utc_now
@@ -33,6 +33,7 @@ class PredictiveContext(BaseModel):
     campaign_active: bool = False
     ransomware_claims_last_30d: int = 0
     sectors_in_play: list[str] = Field(default_factory=list)
+    indexed_signal: PredictionSignal | None = None
     # Live local-sensor signal in [0, 1]; the correlation engine fills this in
     # from recent IntrusionSignal records affecting matched assets.
     local_intrusion_pressure: float = 0.0
@@ -119,6 +120,8 @@ class PredictiveFeatureBuilder:
         return min(1.0, len(ctx.cve.exploit_references) / 4.0)
 
     def _chatter_velocity(self, ctx: PredictiveContext) -> float:
+        if ctx.indexed_signal is not None:
+            return ctx.indexed_signal.chatter_velocity
         if not ctx.source_items or not ctx.threat.related_cves:
             return 0.0
         keys = [cve.lower() for cve in ctx.threat.related_cves]
@@ -132,6 +135,8 @@ class PredictiveFeatureBuilder:
 
     @staticmethod
     def _source_diversity(ctx: PredictiveContext) -> float:
+        if ctx.indexed_signal is not None:
+            return min(1.0, ctx.indexed_signal.source_diversity / 5.0)
         if not ctx.threat.source_references:
             return 0.0
         unique = {ref.source for ref in ctx.threat.source_references}
@@ -139,6 +144,8 @@ class PredictiveFeatureBuilder:
 
     @staticmethod
     def _trusted_corroboration(ctx: PredictiveContext) -> float:
+        if ctx.indexed_signal is not None:
+            return min(1.0, ctx.indexed_signal.trusted_source_count / 3.0)
         if not ctx.threat.source_references:
             return 0.0
         trusted = sum(1 for ref in ctx.threat.source_references if ref.confidence >= 0.8)

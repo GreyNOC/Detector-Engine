@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -32,6 +33,10 @@ class AssetInventory:
 
     def __init__(self, assets: list[AssetRecord] | None = None) -> None:
         self.assets: list[AssetRecord] = list(assets or [])
+        self._assets_by_term: dict[str, list[AssetRecord]] = {}
+        for asset in self.assets:
+            for term in self._asset_terms(asset):
+                self._assets_by_term.setdefault(term, []).append(asset)
 
     @classmethod
     def from_yaml(cls, path: Path) -> AssetInventory:
@@ -48,7 +53,8 @@ class AssetInventory:
 
         matches: list[AssetMatch] = []
         threat_products = {p.lower() for p in threat.affected_products}
-        for asset in self.assets:
+        candidates = self._candidate_assets(threat.affected_products)
+        for asset in candidates:
             for product in threat.affected_products:
                 if not self._matches(asset, product):
                     continue
@@ -62,6 +68,31 @@ class AssetInventory:
                 )
                 break
         return matches
+
+    def _candidate_assets(self, products: list[str]) -> list[AssetRecord]:
+        if not products:
+            return []
+        candidates: dict[str, AssetRecord] = {}
+        for product in products:
+            for term in self._normalize_terms(product):
+                for asset in self._assets_by_term.get(term, []):
+                    candidates[asset.asset_id] = asset
+        if candidates:
+            return list(candidates.values())
+        return self.assets
+
+    @classmethod
+    def _asset_terms(cls, asset: AssetRecord) -> set[str]:
+        values = [asset.vendor, asset.product, asset.name, *asset.tags]
+        terms: set[str] = set()
+        for value in values:
+            if value:
+                terms.update(cls._normalize_terms(value))
+        return terms
+
+    @staticmethod
+    def _normalize_terms(value: str) -> set[str]:
+        return {part for part in re.split(r"[^a-z0-9]+", value.lower()) if len(part) >= 3}
 
     @staticmethod
     def _matches(asset: AssetRecord, product: str) -> bool:

@@ -5,6 +5,7 @@ from greynoc_detector_engine.models.prediction import (
     ConfidenceBand,
     PredictionDriver,
 )
+from greynoc_detector_engine.prediction.calibration import ProbabilityCalibrator
 from greynoc_detector_engine.prediction.exploit_timing import (
     ExploitTimingModel,
     TimingEstimate,
@@ -18,6 +19,7 @@ from greynoc_detector_engine.prediction.weaponization import (
     WeaponizationEstimate,
     WeaponizationModel,
 )
+from greynoc_detector_engine.utils.hashing import canonical_json_hash
 
 # Fusion weights for the final probability — exposed in scoring.yaml.
 DEFAULT_FUSION_WEIGHTS: dict[str, float] = {
@@ -47,13 +49,53 @@ class AttackForecaster:
         timing: ExploitTimingModel | None = None,
         weaponization: WeaponizationModel | None = None,
         fusion_weights: dict[str, float] | None = None,
-        model_version: str = "horizon-1.0",
+        calibration: ProbabilityCalibrator | None = None,
+        model_version: str = "horizon-1.1",
+        config_hash: str | None = None,
     ) -> None:
         self.feature_builder = feature_builder or PredictiveFeatureBuilder()
         self.timing = timing or ExploitTimingModel()
         self.weaponization = weaponization or WeaponizationModel()
         self.fusion_weights = fusion_weights or DEFAULT_FUSION_WEIGHTS
-        self.model_version = model_version
+        self.calibration = calibration
+        self.config_hash = config_hash or canonical_json_hash(
+            {"fusion_weights": self.fusion_weights},
+            length=12,
+        )
+        self.model_version = f"{model_version}+cfg-{self.config_hash[:8]}"
+
+    @classmethod
+    def from_config(
+        cls,
+        *,
+        scoring_config: dict[str, object],
+        horizon_config: dict[str, object],
+        feature_builder: PredictiveFeatureBuilder | None = None,
+        calibration: ProbabilityCalibrator | None = None,
+    ) -> AttackForecaster:
+        raw_weights = scoring_config.get("predictive_fusion_weights", DEFAULT_FUSION_WEIGHTS)
+        weights = (
+            {str(key): float(value) for key, value in raw_weights.items()}
+            if isinstance(raw_weights, dict)
+            else DEFAULT_FUSION_WEIGHTS
+        )
+        config_hash = canonical_json_hash(
+            {
+                "scoring": scoring_config,
+                "attack_horizon": horizon_config,
+                "calibration_samples": calibration.sample_count if calibration else 0,
+            },
+            length=12,
+        )
+        horizon_version = horizon_config.get("version", "1")
+        return cls(
+            feature_builder=feature_builder,
+            timing=ExploitTimingModel.from_config(horizon_config),
+            fusion_weights=weights,
+            calibration=calibration,
+            model_version=f"horizon-{horizon_version}",
+            config_hash=config_hash,
+        )
 
     def forecast(self, ctx: PredictiveContext) -> AttackForecast:
         features = self.feature_builder.build(ctx)
@@ -61,8 +103,15 @@ class AttackForecaster:
         weapon_estimate = self.weaponization.estimate(features)
 
         attack_probability, drivers = self._fuse(features, weapon_estimate)
+        calibration_reason: str | None = None
+        if self.calibration is not None:
+            adjusted = self.calibration.calibrate(attack_probability)
+            attack_probability = adjusted.probability
+            calibration_reason = adjusted.reason
         confidence = self._confidence(features, ctx)
         reasons = self._reasons(features, timing_estimate, weapon_estimate, attack_probability)
+        if calibration_reason is not None:
+            reasons.append(calibration_reason)
         return AttackForecast(
             attack_probability=round(attack_probability, 4),
             horizon=timing_estimate.horizon,
