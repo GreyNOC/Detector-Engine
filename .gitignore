@@ -15,3 +15,7 @@ build/
 *.egg-info/
 data/threat_library/*.sqlite
 data/threat_library/*.sqlite-*
+
+# Local-only outputs / temp clones
+data/test_run/
+greynoc-clones/

@@ -1,0 +1,43 @@
+# Sample asset inventory for the predictive engine's target-likelihood scoring.
+# Copy to config/asset_inventory.yaml (gitignored) and customize for your org.
+# All fields except asset_id and name are optional.
+
+assets:
+  - asset_id: webapp-prod-01
+    name: customer-portal
+    vendor: microsoft
+    product: iis
+    version: "10.0"
+    exposure: internet_facing
+    criticality: crown_jewel
+    sector: financial
+    business_owner: platform-team
+
+  - asset_id: vpn-cluster
+    name: corporate-vpn
+    vendor: fortinet
+    product: fortios
+    version: "7.2"
+    exposure: internet_facing
+    criticality: high
+    sector: corporate-it
+    business_owner: networking
+
+  - asset_id: kube-prod
+    name: kubernetes-prod
+    vendor: kubernetes
+    product: kubernetes
+    version: "1.30"
+    exposure: cloud_public
+    criticality: high
+    business_owner: platform-team
+
+  - asset_id: ai-rag-prod
+    name: internal-rag-assistant
+    vendor: openai
+    product: gpt-4
+    exposure: cloud_public
+    criticality: high
+    sector: corporate-it
+    business_owner: ai-platform
+    tags: [llm, rag, mcp]

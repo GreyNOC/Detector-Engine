@@ -10,7 +10,10 @@ from greynoc_detector_engine.api.routes import (
     health,
     intelligence,
     kev,
+    learning,
+    network,
     operations,
+    predictions,
     scores,
     sources,
     testing,
@@ -39,6 +42,9 @@ def create_app() -> FastAPI:
     app.include_router(intelligence.router)
     app.include_router(scores.router)
     app.include_router(operations.router)
+    app.include_router(predictions.router)
+    app.include_router(network.router)
+    app.include_router(learning.router)
     return app
 
 

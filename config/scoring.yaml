@@ -1,4 +1,6 @@
-version: 1
+version: 2
+
+# Reactive (existing) early-warning weights (unchanged behavior).
 early_warning_weights:
   kev_presence: 16
   cvss_severity: 12
@@ -11,9 +13,27 @@ early_warning_weights:
   vendor_emergency_language: 5
   independent_source_count: 3
   recency: 2
+
+# Predictive fusion weights — fed to AttackForecaster. All values are relative;
+# the forecaster normalizes them. Edit these to retune the predictive layer
+# without touching code.
+predictive_fusion_weights:
+  epss_probability: 0.25
+  kev_listed: 0.20
+  public_exploit_availability: 0.12
+  chatter_velocity: 0.10
+  ransomware_proximity: 0.08
+  active_campaign: 0.07
+  actor_activity: 0.06
+  osint_ioc_corroboration: 0.05
+  trusted_source_corroboration: 0.03
+  independent_source_diversity: 0.02
+  cvss_pressure: 0.01
+  ai_attack_relevance: 0.01
+
+# How a final 0..1 attack probability maps to a SOC priority label.
 labels:
   low: [0, 39]
   medium: [40, 69]
   high: [70, 84]
   critical: [85, 100]
-

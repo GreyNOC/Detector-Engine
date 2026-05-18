@@ -10,12 +10,20 @@ from greynoc_detector_engine.catalog.threat_library import ThreatLibrary
 from greynoc_detector_engine.config.settings import Settings, load_source_registry
 from greynoc_detector_engine.config.source_registry import SourceRegistry
 from greynoc_detector_engine.detection.generators import DetectionGeneratorSuite
+from greynoc_detector_engine.enrich.asset_context import AssetInventory, TargetLikelihoodScorer
+from greynoc_detector_engine.enrich.epss import EPSSEnricher
+from greynoc_detector_engine.enrich.reputation import IndicatorReputationEngine
 from greynoc_detector_engine.enrichment.epss import EPSSClient, enrich_cves_with_epss
 from greynoc_detector_engine.ingest.cve import CVEIngestor
+from greynoc_detector_engine.ingest.epss import EPSSIngestor
+from greynoc_detector_engine.ingest.git_repository import GitRepositoryIngestor
 from greynoc_detector_engine.ingest.github import GitHubIngestor
 from greynoc_detector_engine.ingest.kev import KEVIngestor
 from greynoc_detector_engine.ingest.news import NewsIngestor
+from greynoc_detector_engine.ingest.ransomwatch import RansomwatchIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
+from greynoc_detector_engine.ingest.threatfox import ThreatFoxIngestor
+from greynoc_detector_engine.ingest.urlhaus import URLhausIngestor
 from greynoc_detector_engine.models.detection import (
     DetectionStatus,
     ValidationEvidence,
@@ -35,7 +43,18 @@ from greynoc_detector_engine.storage.base import StorageBackend
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.utils.time import utc_now
 
-IngestSourceName = Literal["cve", "kev", "news", "rss", "github"]
+IngestSourceName = Literal[
+    "cve",
+    "kev",
+    "news",
+    "rss",
+    "github",
+    "git",
+    "epss",
+    "threatfox",
+    "urlhaus",
+    "ransomwatch",
+]
 
 
 class DetectionLifecycleError(ValueError):
@@ -59,24 +78,29 @@ def build_storage(settings: Settings) -> SQLiteStorage:
 
 def initialize_project(settings: Settings) -> JobResult:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    for child in ("raw", "normalized", "detections", "threat_library"):
+    for child in ("raw", "normalized", "detections", "threat_library", "predictions"):
         (settings.data_dir / child).mkdir(parents=True, exist_ok=True)
     build_storage(settings)
-    return JobResult(job="init", counts={"directories": 4, "databases": 1})
+    return JobResult(job="init", counts={"directories": 5, "databases": 1})
 
 
 def run_ingest_job(
     *,
     source: IngestSourceName,
     settings: Settings,
-    storage: StorageBackend,
+    storage: SQLiteStorage,
     fixture_path: Path | None = None,
     registry: SourceRegistry | None = None,
 ) -> JobResult:
     registry = registry or load_source_registry(settings.sources_path)
     configs = _configs_for_source(source, registry)
-    if fixture_path and configs:
-        configs = configs[:1]
+    if fixture_path:
+        if not configs:
+            # Allow fixture-only invocations to use an opt-in source even when
+            # it is disabled in YAML (covers detection_rule_repositories etc.).
+            configs = _configs_for_source(source, registry, include_disabled=True)
+        if configs:
+            configs = configs[:1]
     result = JobResult(job=f"ingest:{source}", counts={"records": 0})
 
     for config in configs:
@@ -160,21 +184,74 @@ def _ingest_config(
         for source_item in source_items:
             storage.upsert_raw_item(source_item)
         return len(source_items)
+    if source == "git":
+        source_items = GitRepositoryIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "epss":
+        epss_scores = EPSSIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for epss in epss_scores:
+            storage.upsert_epss(epss)
+        return len(epss_scores)
+    if source == "threatfox":
+        reps = ThreatFoxIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for rep in reps:
+            storage.upsert_indicator_reputation(rep)
+        return len(reps)
+    if source == "urlhaus":
+        reps = URLhausIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for rep in reps:
+            storage.upsert_indicator_reputation(rep)
+        return len(reps)
+    if source == "ransomwatch":
+        posts = RansomwatchIngestor(config, settings, fixture_path=fixture_path).ingest()
+        # Posts feed correlation's ransomware_posts_30d aggregate only; we
+        # don't persist them as raw items.
+        return len(posts)
     return 0
 
 
-def run_correlation_job(storage: StorageBackend) -> JobResult:
-    report = CorrelationEngine().correlate(
+def run_correlation_job(
+    storage: StorageBackend,
+    *,
+    ransomware_posts_30d: int = 0,
+) -> JobResult:
+    from greynoc_detector_engine.spacestation.orchestrator import local_intrusion_pressure
+
+    epss = EPSSEnricher()
+    epss.load(storage.list_epss())
+    reputation = IndicatorReputationEngine()
+    for rep in storage.list_indicator_reputation():
+        reputation.upsert(rep)
+
+    engine = CorrelationEngine(reputation=reputation, epss_enricher=epss)
+    report = engine.correlate(
         cves=storage.list_cves(),
         kev_entries=storage.list_kev(),
         source_items=storage.list_raw_items(),
+        epss_scores=storage.list_epss(),
+        ransomware_posts_30d=ransomware_posts_30d,
+        local_intrusion_pressure=local_intrusion_pressure(storage),
     )
     library = ThreatLibrary(storage)
     for threat in report.threats:
         library.upsert(threat)
+        if threat.attack_forecast is not None:
+            storage.record_attack_forecast(threat.threat_id, threat.attack_forecast)
+        if threat.predictive_score is not None:
+            storage.record_score_event(threat.threat_id, "predictive", threat.predictive_score)
+    for cluster in report.campaigns:
+        storage.upsert_campaign(cluster)
+
     return JobResult(
         job="correlate",
-        counts={"threats": len(report.threats), "relationships": len(report.relationships)},
+        counts={
+            "threats": len(report.threats),
+            "relationships": len(report.relationships),
+            "campaigns": len(report.campaigns),
+            "forecasts": sum(1 for t in report.threats if t.attack_forecast is not None),
+        },
         messages=[relationship.reason for relationship in report.relationships[:10]],
     )
 
@@ -225,6 +302,61 @@ def run_score_job(storage: StorageBackend) -> JobResult:
         storage.upsert_threat(updated)
         count += 1
     return JobResult(job="score", counts={"threats": count})
+
+
+def run_predict_job(
+    storage: SQLiteStorage,
+    *,
+    asset_inventory_path: Path | None = None,
+) -> JobResult:
+    """Run only the predictive layer over existing threats and write forecasts.
+
+    This is a no-cost re-run that recomputes forecasts using whatever OSINT
+    data is currently in storage (EPSS, indicator reputation, ransomware posts),
+    and optionally writes per-asset target likelihoods if an inventory is given.
+    """
+
+    epss = EPSSEnricher()
+    epss.load(storage.list_epss())
+    reputation = IndicatorReputationEngine()
+    for rep in storage.list_indicator_reputation():
+        reputation.upsert(rep)
+    engine = CorrelationEngine(reputation=reputation, epss_enricher=epss)
+
+    threats_in = storage.list_threats()
+    cves = {c.cve_id: c for c in storage.list_cves()}
+    kev_entries = {k.cve_id: k for k in storage.list_kev()}
+    source_items = storage.list_raw_items()
+
+    inventory = AssetInventory.from_yaml(asset_inventory_path) if asset_inventory_path else None
+    likelihood_scorer = TargetLikelihoodScorer()
+
+    forecast_count = 0
+    likelihood_count = 0
+    for threat in threats_in:
+        cve = cves.get(threat.related_cves[0]) if threat.related_cves else None
+        kev = kev_entries.get(threat.related_cves[0]) if threat.related_cves else None
+        rescored = engine.rescore(
+            threat,
+            cve=cve,
+            kev=kev,
+            source_items=source_items,
+        )
+        storage.upsert_threat(rescored)
+        if rescored.attack_forecast is not None:
+            storage.record_attack_forecast(rescored.threat_id, rescored.attack_forecast)
+            forecast_count += 1
+        if rescored.predictive_score is not None:
+            storage.record_score_event(rescored.threat_id, "predictive", rescored.predictive_score)
+        if inventory:
+            matches = inventory.match_threat(rescored)
+            for likelihood in likelihood_scorer.score(rescored, matches):
+                storage.record_target_likelihood(likelihood)
+                likelihood_count += 1
+    return JobResult(
+        job="predict",
+        counts={"forecasts": forecast_count, "target_likelihoods": likelihood_count},
+    )
 
 
 def generate_detections_for_threat(storage: StorageBackend, threat_id: str) -> JobResult:
@@ -327,21 +459,39 @@ def generate_detections_for_all(storage: StorageBackend) -> JobResult:
     return JobResult(job="generate-detections", counts={"detections": total})
 
 
-def _configs_for_source(source: IngestSourceName, registry: SourceRegistry) -> list[SourceConfig]:
+def _configs_for_source(
+    source: IngestSourceName,
+    registry: SourceRegistry,
+    *,
+    include_disabled: bool = False,
+) -> list[SourceConfig]:
+    pool = registry.sources if include_disabled else registry.enabled()
+
+    def of_type(*types: SourceType) -> list[SourceConfig]:
+        return [c for c in pool if c.type in types]
+
     if source == "cve":
-        return registry.by_type(SourceType.CVE_JSON)
+        return of_type(SourceType.CVE_JSON)
     if source == "kev":
-        return registry.by_type(SourceType.KEV_JSON)
+        return of_type(SourceType.KEV_JSON)
     if source == "github":
-        return registry.by_type(SourceType.GITHUB_REPOSITORY) + registry.by_type(
-            SourceType.GITHUB_SEARCH
-        )
+        return of_type(SourceType.GITHUB_REPOSITORY, SourceType.GITHUB_SEARCH)
+    if source == "git":
+        return of_type(SourceType.GIT_REPOSITORY)
     if source == "rss":
-        return registry.by_type(SourceType.RSS)
+        return of_type(SourceType.RSS)
     if source == "news":
         return [
             config
-            for config in registry.by_type(SourceType.RSS) + registry.by_type(SourceType.NEWS)
+            for config in of_type(SourceType.RSS, SourceType.NEWS)
             if "news" in config.tags or config.category == "news"
         ]
+    if source == "epss":
+        return of_type(SourceType.EPSS_JSON)
+    if source == "threatfox":
+        return of_type(SourceType.THREATFOX_JSON)
+    if source == "urlhaus":
+        return of_type(SourceType.URLHAUS_JSON)
+    if source == "ransomwatch":
+        return of_type(SourceType.RANSOMWATCH_JSON)
     return []

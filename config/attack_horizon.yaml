@@ -1,0 +1,43 @@
+version: 1
+
+# Hazard-model knobs for ExploitTimingModel.
+# baseline_hazard is the daily probability mass before any signal is observed.
+# Signal contributions are added; final hazard determines median time-to-event.
+timing_model:
+  baseline_hazard: 0.001
+  contributions:
+    epss_probability_scale: 30.0      # divides log(1/(1-epss)) into a per-day hazard
+    public_exploit_availability: 0.04
+    chatter_velocity_threshold: 0.4
+    chatter_velocity: 0.05
+    cvss_pressure_threshold: 0.7
+    cvss_pressure: 0.02
+    ransomware_proximity_threshold: 0.5
+    ransomware_proximity: 0.03
+    actor_activity_threshold: 0.5
+    actor_activity: 0.02
+    active_campaign: 0.03
+
+horizon_buckets_days:
+  imminent_max: 7
+  near_term_max: 30
+  mid_term_max: 90
+  long_term_max: 365
+
+# Asset-targeting model.
+target_likelihood:
+  exposure_weights:
+    internal: 0.25
+    dmz: 0.55
+    internet_facing: 0.9
+    cloud_public: 0.85
+  criticality_weights:
+    low: 0.2
+    medium: 0.5
+    high: 0.8
+    crown_jewel: 1.0
+
+# Campaign clustering.
+campaign:
+  proximity_days: 21
+  minimum_match_score: 3
