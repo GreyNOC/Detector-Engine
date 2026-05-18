@@ -232,9 +232,14 @@ def sensor_signals() -> None:
 @sensor_app.command("honeypot")
 def sensor_honeypot(
     port: int = typer.Option(..., "--port", help="TCP port to bind."),
-    bind_host: str = typer.Option("0.0.0.0", "--bind"),
+    bind_host: str = typer.Option("127.0.0.1", "--bind"),
     label: str = typer.Option("default-darknet", "--label"),
     capture_bytes: int = typer.Option(64, "--capture-bytes"),
+    allow_external_bind: bool = typer.Option(
+        False,
+        "--allow-external-bind",
+        help="Required when --bind is not loopback. Use only when intentionally exposing the listener.",
+    ),
 ) -> None:
     """Run the darknet TCP listener. Every connection is logged + cataloged.
 
@@ -249,7 +254,11 @@ def sensor_honeypot(
 
     storage = build_storage(get_settings())
     config = HoneypotConfig(
-        label=label, bind_host=bind_host, port=port, capture_bytes=capture_bytes
+        label=label,
+        bind_host=bind_host,
+        port=port,
+        capture_bytes=capture_bytes,
+        allow_external_bind=allow_external_bind,
     )
 
     def on_event(event):  # type: ignore[no-untyped-def]
