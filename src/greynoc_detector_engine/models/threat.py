@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.models.detection import GeneratedDetection
 from greynoc_detector_engine.models.indicator import Indicator
+from greynoc_detector_engine.models.prediction import AttackForecast, EPSSScore
 from greynoc_detector_engine.models.scoring import ScoreResult
 from greynoc_detector_engine.models.source import SourceReference
 
@@ -71,6 +72,12 @@ class ThreatRecord(BaseModel):
     exploitability_score: ScoreResult | None = None
     early_warning_score: ScoreResult | None = None
     ai_abuse_score: ScoreResult | None = None
+    predictive_score: ScoreResult | None = None
+    attack_forecast: AttackForecast | None = None
+    epss_scores: list[EPSSScore] = Field(default_factory=list)
+    suspected_actors: list[str] = Field(default_factory=list)
+    campaign_ids: list[str] = Field(default_factory=list)
+    sectors_at_risk: list[str] = Field(default_factory=list)
     recommended_soc_actions: list[str] = Field(default_factory=list)
     detection_opportunities: list[str] = Field(default_factory=list)
     generated_detections: list[GeneratedDetection] = Field(default_factory=list)

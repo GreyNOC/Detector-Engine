@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from greynoc_detector_engine.detection.safety import sanitize_rule_term
 from greynoc_detector_engine.models.detection import DetectionKind, GeneratedDetection
 from greynoc_detector_engine.models.threat import ThreatRecord
 
@@ -7,14 +8,22 @@ from greynoc_detector_engine.models.threat import ThreatRecord
 class YaraGenerator:
     def generate(self, threat: ThreatRecord) -> GeneratedDetection:
         rule_name = threat.threat_id.replace("-", "_")
-        references = ", ".join(ref.url or ref.title for ref in threat.source_references[:5])
+        safe_title = sanitize_rule_term(threat.title) or "draft"
+        # References are interpolated into a YARA meta string; sanitize hard
+        # to avoid embedded quotes/newlines breaking the rule.
+        ref_blob = (
+            ", ".join(
+                sanitize_rule_term(ref.url or ref.title) for ref in threat.source_references[:5]
+            )
+            or "no references"
+        )
         rule = f"""rule GREYNOC_Metadata_{rule_name}
 {{
     meta:
-        description = "Metadata-only draft for {threat.title}"
+        description = "Metadata-only draft for {safe_title}"
         threat_id = "{threat.threat_id}"
         severity = "{threat.severity.value}"
-        references = "{references}"
+        references = "{ref_blob}"
         validation = "Add validated strings or structural features before deployment."
     condition:
         false
@@ -23,7 +32,7 @@ class YaraGenerator:
         return GeneratedDetection(
             related_threat_id=threat.threat_id,
             kind=DetectionKind.YARA,
-            title=f"Metadata-only YARA Template for {threat.title}",
+            title=f"Metadata-only YARA Template for {safe_title}",
             description=(
                 "Metadata-only YARA template. Condition is false until validated indicators exist."
             ),

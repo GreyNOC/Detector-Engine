@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from greynoc_detector_engine.api.dependencies import get_app_settings, get_storage
+from greynoc_detector_engine.api.safety import validate_fixture_path
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
@@ -24,12 +23,13 @@ def run_ingest(
     settings: Settings = Depends(get_app_settings),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
+    fixture_path = validate_fixture_path(fixture, settings)
     try:
         result = run_ingest_job(
             source=source,
             settings=settings,
             storage=storage,
-            fixture_path=Path(fixture) if fixture else None,
+            fixture_path=fixture_path,
         )
     except IngestSourceUnavailable as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -79,12 +79,13 @@ def _ingest_source(
     settings: Settings,
     storage: SQLiteStorage,
 ) -> dict[str, object]:
+    fixture_path = validate_fixture_path(fixture, settings)
     try:
         result = run_ingest_job(
             source=source,
             settings=settings,
             storage=storage,
-            fixture_path=Path(fixture) if fixture else None,
+            fixture_path=fixture_path,
         )
     except IngestSourceUnavailable as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

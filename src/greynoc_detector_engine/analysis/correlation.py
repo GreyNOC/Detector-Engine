@@ -2,20 +2,31 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from greynoc_detector_engine.analysis.campaign import CampaignClusterer
 from greynoc_detector_engine.analysis.narrative_builder import NarrativeBuilder
 from greynoc_detector_engine.analysis.soc_recommendations import SOCRecommendationBuilder
+from greynoc_detector_engine.enrich.epss import EPSSEnricher
+from greynoc_detector_engine.enrich.reputation import IndicatorReputationEngine
+from greynoc_detector_engine.enrich.threat_actor import ThreatActorAttributor
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.kev import KEVRecord
+from greynoc_detector_engine.models.prediction import CampaignCluster, EPSSScore
 from greynoc_detector_engine.models.source import SourceItem
 from greynoc_detector_engine.models.threat import ThreatRecord, ThreatSeverity
 from greynoc_detector_engine.normalize.entity_extractor import EntityExtractor
 from greynoc_detector_engine.normalize.normalizer import ThreatNormalizer
+from greynoc_detector_engine.prediction.attack_forecast import AttackForecaster
+from greynoc_detector_engine.prediction.features import (
+    PredictiveContext,
+    PredictiveFeatureBuilder,
+)
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
 from greynoc_detector_engine.scoring.early_warning import (
     EarlyWarningScorer,
     EarlyWarningSignals,
 )
 from greynoc_detector_engine.scoring.exploitability import ExploitabilityScorer
+from greynoc_detector_engine.scoring.predictive import PredictiveScorer
 from greynoc_detector_engine.scoring.risk import RiskScorer
 
 
@@ -34,10 +45,28 @@ class CorrelationReport(BaseModel):
 
     relationships: list[CorrelationRelationship] = Field(default_factory=list)
     threats: list[ThreatRecord] = Field(default_factory=list)
+    campaigns: list[CampaignCluster] = Field(default_factory=list)
 
 
 class CorrelationEngine:
-    def __init__(self) -> None:
+    """The orchestrator: ingests normalized inputs and produces scored threats.
+
+    Reactive pipeline:
+        CVE/KEV/source items -> ThreatRecord -> exploitability / AI-abuse /
+        early-warning scoring.
+
+    Predictive pipeline (new):
+        Threat + CVE + KEV + EPSS + source items + suspected actors + active
+        campaign -> PredictiveContext -> AttackForecast -> ScoreResult fused
+        into final risk.
+    """
+
+    def __init__(
+        self,
+        *,
+        reputation: IndicatorReputationEngine | None = None,
+        epss_enricher: EPSSEnricher | None = None,
+    ) -> None:
         self.extractor = EntityExtractor()
         self.normalizer = ThreatNormalizer()
         self.exploitability = ExploitabilityScorer()
@@ -46,6 +75,17 @@ class CorrelationEngine:
         self.risk = RiskScorer()
         self.narratives = NarrativeBuilder()
         self.soc = SOCRecommendationBuilder()
+        self.actor_attributor = ThreatActorAttributor()
+        self.reputation = reputation or IndicatorReputationEngine()
+        self.epss = epss_enricher or EPSSEnricher()
+        self.feature_builder = PredictiveFeatureBuilder(
+            reputation=self.reputation,
+            actor_attributor=self.actor_attributor,
+            epss=self.epss,
+        )
+        self.forecaster = AttackForecaster(feature_builder=self.feature_builder)
+        self.predictive_scorer = PredictiveScorer()
+        self.campaign = CampaignClusterer()
 
     def correlate(
         self,
@@ -53,7 +93,13 @@ class CorrelationEngine:
         cves: list[CVERecord],
         kev_entries: list[KEVRecord],
         source_items: list[SourceItem],
+        epss_scores: list[EPSSScore] | None = None,
+        ransomware_posts_30d: int = 0,
+        local_intrusion_pressure: float = 0.0,
     ) -> CorrelationReport:
+        if epss_scores:
+            self.epss.load(epss_scores)
+
         relationships: list[CorrelationRelationship] = []
         threats: list[ThreatRecord] = []
         kev_by_cve = {entry.cve_id: entry for entry in kev_entries}
@@ -84,7 +130,15 @@ class CorrelationEngine:
                         reason="CVE appears in the CISA Known Exploited Vulnerabilities catalog.",
                     )
                 )
-            threat = self._score_threat(threat, cve=cve, kev=kev, related_items=related_items)
+            threat = self._score_threat(
+                threat,
+                cve=cve,
+                kev=kev,
+                related_items=related_items,
+                source_items=source_items,
+                ransomware_posts_30d=ransomware_posts_30d,
+                local_intrusion_pressure=local_intrusion_pressure,
+            )
             threats.append(threat)
 
         known_cves = {cve.cve_id for cve in cves}
@@ -95,10 +149,59 @@ class CorrelationEngine:
             if not entities.ai_terms and not entities.exploit_terms:
                 continue
             threat = self.normalizer.from_source_item(item)
-            threat = self._score_threat(threat, cve=None, kev=None, related_items=[item])
+            threat = self._score_threat(
+                threat,
+                cve=None,
+                kev=None,
+                related_items=[item],
+                source_items=source_items,
+                ransomware_posts_30d=ransomware_posts_30d,
+                local_intrusion_pressure=local_intrusion_pressure,
+            )
             threats.append(threat)
 
-        return CorrelationReport(relationships=relationships, threats=threats)
+        # Cluster into campaigns after each threat is scored so cluster cohesion
+        # can in turn feed back into threats' active_campaign flag.
+        campaigns = self.campaign.cluster(threats, source_items)
+        threats = self._mark_campaign_membership(threats, campaigns)
+        for cluster in campaigns:
+            for tid in cluster.related_threat_ids:
+                relationships.append(
+                    CorrelationRelationship(
+                        relationship_type="threat_campaign",
+                        left=tid,
+                        right=cluster.campaign_id,
+                        confidence=cluster.cohesion,
+                        reason=f"Threat assigned to campaign cluster {cluster.label}.",
+                    )
+                )
+
+        return CorrelationReport(
+            relationships=relationships,
+            threats=threats,
+            campaigns=campaigns,
+        )
+
+    def rescore(
+        self,
+        threat: ThreatRecord,
+        *,
+        cve: CVERecord | None = None,
+        kev: KEVRecord | None = None,
+        source_items: list[SourceItem] | None = None,
+        ransomware_posts_30d: int = 0,
+        local_intrusion_pressure: float = 0.0,
+    ) -> ThreatRecord:
+        """Re-run the full reactive + predictive scoring pipeline on a single threat."""
+        return self._score_threat(
+            threat,
+            cve=cve,
+            kev=kev,
+            related_items=[],
+            source_items=source_items or [],
+            ransomware_posts_30d=ransomware_posts_30d,
+            local_intrusion_pressure=local_intrusion_pressure,
+        )
 
     def _score_threat(
         self,
@@ -107,6 +210,9 @@ class CorrelationEngine:
         cve: CVERecord | None,
         kev: KEVRecord | None,
         related_items: list[SourceItem],
+        source_items: list[SourceItem],
+        ransomware_posts_30d: int,
+        local_intrusion_pressure: float = 0.0,
     ) -> ThreatRecord:
         scored = threat.model_copy(deep=True)
         text = " ".join([item.title + " " + item.raw_content for item in related_items])
@@ -115,6 +221,8 @@ class CorrelationEngine:
         news_mentions = len(related_items) - github_mentions
         independent_sources = len({item.source_id for item in related_items})
         ai_relevance = 1.0 if scored.ai_attack_type or entities.ai_terms else 0.0
+
+        # --- reactive scoring (unchanged behavior) ---
         ew_signals = EarlyWarningSignals(
             kev_presence=kev is not None,
             cvss_score=cve.cvss_score if cve else None,
@@ -135,12 +243,74 @@ class CorrelationEngine:
         scored.exploitability_score = self.exploitability.score(cve=cve, kev=kev, threat=scored)
         scored.early_warning_score = self.early_warning.score(ew_signals)
         scored.ai_abuse_score = self.ai_attack.score(scored)
+
+        # --- predictive scoring ---
+        suspected_actors = self.actor_attributor.actor_ids(scored.title + " " + text)
+        epss_score = None
+        for cve_id in scored.related_cves:
+            got = self.epss.for_cve(cve_id)
+            if got is not None:
+                epss_score = got
+                break
+        ctx = PredictiveContext(
+            threat=scored,
+            cve=cve,
+            kev=kev,
+            epss=epss_score,
+            source_items=source_items,
+            suspected_actors=suspected_actors,
+            campaign_active=False,  # set after clustering
+            ransomware_claims_last_30d=ransomware_posts_30d,
+            sectors_in_play=list(scored.sectors_at_risk),
+            local_intrusion_pressure=local_intrusion_pressure,
+        )
+        forecast = self.forecaster.forecast(ctx)
+        scored.attack_forecast = forecast
+        scored.predictive_score = self.predictive_scorer.score(forecast)
+        if epss_score is not None:
+            scored.epss_scores = [epss_score]
+        scored.suspected_actors = suspected_actors
+
+        # --- fused risk + narratives ---
         risk = self.risk.score(threat=scored, cve=cve, kev=kev)
         scored.severity = ThreatSeverity(risk.label.value)
         scored.summary = self.narratives.build(scored)
         scored.recommended_soc_actions = self.soc.recommend(scored, cve=cve, kev=kev)
-        scored.changelog.append("Correlation engine applied explainable scoring.")
+        scored.changelog.append(
+            "Predictive + reactive scoring applied (model "
+            f"{forecast.model_version}, p={forecast.attack_probability:.2f}, "
+            f"horizon={forecast.horizon.value})."
+        )
         return scored
+
+    def _mark_campaign_membership(
+        self,
+        threats: list[ThreatRecord],
+        campaigns: list[CampaignCluster],
+    ) -> list[ThreatRecord]:
+        membership: dict[str, list[str]] = {}
+        for cluster in campaigns:
+            for tid in cluster.related_threat_ids:
+                membership.setdefault(tid, []).append(cluster.campaign_id)
+        updated: list[ThreatRecord] = []
+        for threat in threats:
+            ids = membership.get(threat.threat_id, [])
+            if not ids:
+                updated.append(threat)
+                continue
+            copy = threat.model_copy(deep=True)
+            copy.campaign_ids = ids
+            if copy.attack_forecast is not None:
+                # If we are in an active cluster, nudge the forecast slightly
+                # rather than recomputing — recomputation already happened.
+                membership_note = "Campaign membership recognized."
+                copy.attack_forecast = copy.attack_forecast.model_copy(
+                    update={
+                        "reasons": [*copy.attack_forecast.reasons, membership_note],
+                    }
+                )
+            updated.append(copy)
+        return updated
 
     def _items_by_cve(self, items: list[SourceItem]) -> dict[str, list[SourceItem]]:
         grouped: dict[str, list[SourceItem]] = {}

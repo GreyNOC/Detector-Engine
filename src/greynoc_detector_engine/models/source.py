@@ -21,6 +21,9 @@ class SourceCategory(StrEnum):
     NEWS = "news"
     CVE = "cve"
     KEV = "kev"
+    EPSS = "epss"
+    OSINT_IOC_FEED = "osint_ioc_feed"
+    RANSOMWARE_LEAK_TRACKER = "ransomware_leak_tracker"
 
 
 class SourceType(StrEnum):
@@ -31,6 +34,11 @@ class SourceType(StrEnum):
     NEWS = "news"
     GITHUB_REPOSITORY = "github_repository"
     GITHUB_SEARCH = "github_search"
+    GIT_REPOSITORY = "git_repository"
+    EPSS_JSON = "epss_json"
+    THREATFOX_JSON = "threatfox_json"
+    URLHAUS_JSON = "urlhaus_json"
+    RANSOMWATCH_JSON = "ransomwatch_json"
 
 
 class SourceReliability(StrEnum):

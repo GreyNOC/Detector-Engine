@@ -12,6 +12,10 @@ SOURCE_CATEGORY_ALIASES = {
     "vendor_advisories": "vendor_advisory",
     "security_research": "security_research_blog",
     "ai_security": "ai_security_research",
+    "predictive_priors": "epss",
+    "osint_ioc_feeds": "osint_ioc_feed",
+    "ransomware_leak_trackers": "ransomware_leak_tracker",
+    "detection_rule_repositories": "security_research_blog",
 }
 
 

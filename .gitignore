@@ -13,3 +13,10 @@ build/
 data/threat_library/*.sqlite
 data/threat_library/*.sqlite-*
 
+# Claude Code worktree / session metadata
+.claude/
+
+# Local-only outputs / temp clones
+data/test_run/
+greynoc-clones/
+

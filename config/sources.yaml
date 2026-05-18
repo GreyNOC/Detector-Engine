@@ -1,9 +1,21 @@
-version: 1
+version: 2
 policy:
   defensive_only: true
   store_untrusted_code: false
-  execute_untrusted_code: false
-  github_metadata_only: true
+  execute_untrusted_code: false        # ABSOLUTE — never relaxed
+  github_metadata_only: true            # for github_search sources
+  osint_ioc_storage: metadata_only
+  ransomware_leak_tracking: metadata_only
+  git_clone:
+    enabled: opt_in                     # disabled unless a source enables itself
+    require_per_source_allowlist: true  # always enforced; no global allowlist
+    https_only: true
+    shallow_only: true                  # --depth=1 --single-branch
+    no_submodules: true
+    content_only: true                  # text files only; never executed
+    default_max_file_size_kb: 256
+    default_max_total_size_mb: 100
+    default_clone_timeout_s: 60
 
 government_advisories:
   - id: cisa-kev-json
@@ -24,6 +36,7 @@ government_advisories:
     tags: [cve, vulnerability, government]
   - id: cisa-advisories-rss
     name: CISA Cybersecurity Advisories
+    category: government_advisory
     type: rss
     url: https://www.cisa.gov/cybersecurity-advisories/all.xml
     enabled: true
@@ -33,6 +46,7 @@ government_advisories:
 vendor_advisories:
   - id: microsoft-msrc
     name: Microsoft Security Response Center
+    category: vendor_advisory
     type: rss
     url: https://msrc.microsoft.com/blog/feed
     enabled: true
@@ -40,6 +54,7 @@ vendor_advisories:
     tags: [vendor, microsoft, advisory]
   - id: cisco-security-advisories
     name: Cisco Security Advisories
+    category: vendor_advisory
     type: rss
     url: https://sec.cloudapps.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml
     enabled: true
@@ -47,6 +62,7 @@ vendor_advisories:
     tags: [vendor, cisco, advisory]
   - id: palo-alto-security-advisories
     name: Palo Alto Security Advisories
+    category: vendor_advisory
     type: rss
     url: https://security.paloaltonetworks.com/rss.xml
     enabled: true
@@ -54,6 +70,7 @@ vendor_advisories:
     tags: [vendor, palo-alto, advisory]
   - id: fortinet-psirt
     name: Fortinet PSIRT
+    category: vendor_advisory
     type: rss
     url: https://www.fortiguard.com/rss/ir.xml
     enabled: true
@@ -61,6 +78,7 @@ vendor_advisories:
     tags: [vendor, fortinet, psirt]
   - id: vmware-security-advisories
     name: VMware Security Advisories
+    category: vendor_advisory
     type: rss
     url: https://blogs.vmware.com/security/advisories/feed
     enabled: true
@@ -70,6 +88,7 @@ vendor_advisories:
 security_research:
   - id: mandiant
     name: Mandiant
+    category: security_research_blog
     type: rss
     url: https://cloud.google.com/blog/topics/threat-intelligence/rss
     enabled: true
@@ -77,6 +96,7 @@ security_research:
     tags: [research, incident-response, threat-intel]
   - id: unit-42
     name: Unit 42
+    category: security_research_blog
     type: rss
     url: https://unit42.paloaltonetworks.com/feed
     enabled: true
@@ -84,6 +104,7 @@ security_research:
     tags: [research, malware, threat-intel]
   - id: talos
     name: Talos
+    category: security_research_blog
     type: rss
     url: https://blog.talosintelligence.com/rss
     enabled: true
@@ -91,6 +112,7 @@ security_research:
     tags: [research, threat-intel]
   - id: rapid7
     name: Rapid7
+    category: security_research_blog
     type: rss
     url: https://www.rapid7.com/blog/rss
     enabled: true
@@ -98,6 +120,7 @@ security_research:
     tags: [research, vulnerability]
   - id: sophos-xops
     name: Sophos X-Ops
+    category: security_research_blog
     type: rss
     url: https://news.sophos.com/en-us/category/threat-research/feed/
     enabled: true
@@ -105,6 +128,7 @@ security_research:
     tags: [research, malware, threat-intel]
   - id: dfir-report
     name: The DFIR Report
+    category: security_research_blog
     type: rss
     url: https://thedfirreport.com/feed/
     enabled: true
@@ -112,48 +136,114 @@ security_research:
     tags: [incident-response, threat-intel]
 
 ai_security:
-  - id: owasp-genai-security
-    name: OWASP GenAI Security
-    type: rss
-    url: https://genai.owasp.org/feed/
-    enabled: false
-    reliability: medium
-    tags: [ai-security, owasp, genai]
   - id: trail-of-bits-ai
     name: Trail of Bits AI Security Research
+    category: ai_security_research
     type: rss
     url: https://blog.trailofbits.com/feed/
     enabled: true
     reliability: high
     tags: [ai-security, research]
-  - id: protect-ai
-    name: Protect AI
-    type: rss
-    url: https://protectai.com/blog/rss.xml
-    enabled: false
-    reliability: medium
-    tags: [ai-security, model-security]
-  - id: hiddenlayer
-    name: HiddenLayer
-    type: rss
-    url: https://hiddenlayer.com/feed/
-    enabled: false
-    reliability: medium
-    tags: [ai-security, model-security]
-  - id: lakera
-    name: Lakera
-    type: rss
-    url: https://www.lakera.ai/blog/rss.xml
-    enabled: false
-    reliability: medium
-    tags: [ai-security, prompt-injection]
   - id: wiz-research
     name: Wiz Research
+    category: ai_security_research
     type: rss
     url: https://www.wiz.io/blog/rss.xml
     enabled: true
     reliability: high
     tags: [cloud-security, ai-security, research]
+
+# --- Detection-rule repositories (opt-in clone-and-harvest) --------------
+# These are *defensive content* repos. The engine clones them shallowly via
+# the safe GitCloner, walks text files (yml/yara/rules/md/json/txt) under
+# size caps, and stores excerpts as SourceItems. Code is never executed.
+# Each source must declare its own `clone_allowlist` of host/path prefixes.
+detection_rule_repositories:
+  - id: sigma-hq
+    name: SigmaHQ Sigma Rules
+    category: security_research_blog
+    type: git_repository
+    url: https://github.com/SigmaHQ/sigma.git
+    enabled: false
+    reliability: high
+    tags: [detection, sigma, rule-content]
+    metadata:
+      clone_allowlist:
+        - github.com/sigmahq/sigma
+      content_extensions: [.yml, .yaml]
+      max_file_size_kb: 256
+      max_total_size_mb: 100
+      cleanup_after_ingest: true
+      clone_timeout_s: 120
+  - id: yara-rules
+    name: YARA-Rules
+    category: security_research_blog
+    type: git_repository
+    url: https://github.com/Yara-Rules/rules.git
+    enabled: false
+    reliability: high
+    tags: [detection, yara, rule-content]
+    metadata:
+      clone_allowlist:
+        - github.com/yara-rules/rules
+      content_extensions: [.yar, .yara]
+      max_file_size_kb: 256
+      max_total_size_mb: 100
+      cleanup_after_ingest: true
+  - id: signature-base
+    name: Florian Roth signature-base
+    category: security_research_blog
+    type: git_repository
+    url: https://github.com/Neo23x0/signature-base.git
+    enabled: false
+    reliability: high
+    tags: [detection, yara, sigma, rule-content]
+    metadata:
+      clone_allowlist:
+        - github.com/neo23x0/signature-base
+      content_extensions: [.yar, .yara, .yml, .yaml]
+      max_file_size_kb: 256
+      max_total_size_mb: 100
+      cleanup_after_ingest: true
+
+# --- NEW: predictive / OSINT corpora --------------------------------------
+predictive_priors:
+  - id: first-org-epss
+    name: FIRST.org EPSS daily scores
+    category: epss
+    type: epss_json
+    url: https://api.first.org/data/v1/epss
+    enabled: true
+    reliability: verified
+    tags: [epss, predictive, prior]
+
+osint_ioc_feeds:
+  - id: abusech-threatfox
+    name: abuse.ch ThreatFox recent IOCs
+    category: osint_ioc_feed
+    type: threatfox_json
+    url: https://threatfox-api.abuse.ch/api/v1/
+    enabled: true
+    reliability: high
+    tags: [ioc, malware, c2, abuse-ch]
+  - id: abusech-urlhaus
+    name: abuse.ch URLhaus malicious URL feed
+    category: osint_ioc_feed
+    type: urlhaus_json
+    url: https://urlhaus.abuse.ch/downloads/json_recent/
+    enabled: true
+    reliability: high
+    tags: [ioc, url, malware, abuse-ch]
+
+ransomware_leak_trackers:
+  - id: ransomwatch-public
+    name: Ransomwatch public leak-site index
+    category: ransomware_leak_tracker
+    type: ransomwatch_json
+    url: https://ransomwatch.telemetry.ltd/posts.json
+    enabled: true
+    reliability: high
+    tags: [ransomware, leak-site, metadata-only]
 
 github_monitoring:
   keywords:
@@ -194,4 +284,3 @@ ai_attack_terms:
   - autonomous agent
   - MCP security
   - vector database
-
