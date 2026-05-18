@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import typer
 
 from greynoc_detector_engine.config.settings import get_settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
-from greynoc_detector_engine.models.detection import DetectionKind, DetectionStatus
+from greynoc_detector_engine.models.detection import DetectionKind, DetectionStatus, GeneratedDetection
 from greynoc_detector_engine.models.threat import ThreatRecord, ThreatSeverity, ThreatStatus
 from greynoc_detector_engine.utils.logging import configure_logging
 from greynoc_detector_engine.workers.jobs import (
@@ -23,6 +24,7 @@ from greynoc_detector_engine.workers.jobs import (
 
 DEFAULT_CLI_LIMIT = 100
 MAX_CLI_LIMIT = 500
+EnumT = TypeVar("EnumT", bound=StrEnum)
 IngestCliSource = Literal[
     "cve",
     "kev",
@@ -736,7 +738,7 @@ def _count_by_value(values: list[str]) -> dict[str, int]:
     return counts
 
 
-def _parse_enum(enum_type: type[Any], raw: str, name: str) -> Any:
+def _parse_enum(enum_type: type[EnumT], raw: str, name: str) -> EnumT:
     try:
         return enum_type(raw)
     except ValueError as exc:
@@ -762,7 +764,7 @@ def _threat_summary(threat: ThreatRecord) -> dict[str, Any]:
     }
 
 
-def _detection_summary(detection: Any) -> dict[str, Any]:
+def _detection_summary(detection: GeneratedDetection) -> dict[str, Any]:
     return {
         "detection_id": detection.detection_id,
         "related_threat_id": detection.related_threat_id,
