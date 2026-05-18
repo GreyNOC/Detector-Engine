@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,7 +28,7 @@ from greynoc_detector_engine.utils.logging import configure_logging
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> Iterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     storage = SQLiteStorage(settings.database_path)
     storage.initialize()
