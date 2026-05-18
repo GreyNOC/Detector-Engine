@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from greynoc_detector_engine.utils.time import utc_now
 
@@ -46,6 +46,12 @@ class SourceReliability(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
     VERIFIED = "verified"
+
+
+class SourceRunStatus(StrEnum):
+    OK = "ok"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class SourceConfig(BaseModel):
@@ -104,3 +110,25 @@ class SourceItem(BaseModel):
             confidence=self.confidence,
             raw_excerpt=self.raw_excerpt,
         )
+
+
+class SourceRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int | None = None
+    source_id: str
+    status: SourceRunStatus
+    message: str = ""
+    item_count: int = Field(default=0, ge=0)
+    started_at: datetime = Field(default_factory=utc_now)
+    ended_at: datetime = Field(default_factory=utc_now)
+    error_message: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_run_timestamps(self) -> SourceRun:
+        if self.ended_at < self.started_at:
+            raise ValueError("ended_at must be greater than or equal to started_at")
+        if self.status == SourceRunStatus.FAILED and not self.error_message:
+            raise ValueError("failed source runs must include error_message")
+        return self

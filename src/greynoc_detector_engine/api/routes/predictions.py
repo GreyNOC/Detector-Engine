@@ -4,16 +4,21 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from greynoc_detector_engine.api.dependencies import get_app_settings, get_storage
+from greynoc_detector_engine.api.dependencies import (
+    get_app_settings,
+    get_storage,
+    require_api_key,
+)
 from greynoc_detector_engine.api.safety import validate_fixture_path
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import run_predict_job
 
 router = APIRouter(tags=["predictions"])
+Protected = Depends(require_api_key)
 
 
-@router.post("/predict/run")
+@router.post("/predict/run", dependencies=[Protected])
 def run_prediction(
     asset_inventory: str | None = Query(default=None),
     settings: Settings = Depends(get_app_settings),

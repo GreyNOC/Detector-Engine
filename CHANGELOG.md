@@ -5,7 +5,6 @@
 Released as v0.9.1; v0.9.0 on origin pre-existed from an earlier release.
 The semantic content of this version is the v0.9 milestone.
 
-
 This release turns the reactive aggregator into a forward-looking, fully
 explainable predictive engine that also senses the local network, classifies
 ICS devices, and exports to the wider defender ecosystem.
@@ -40,22 +39,7 @@ ICS devices, and exports to the wider defender ecosystem.
 - **`doctor` CLI** — self-check confirms safety defaults (loopback honeypot,
   HTTP body + redirect caps) and reports per-source ingest health.
 
-### New CLI
-
-```
-greynoc-detector ingest {cve|kev|rss|epss|threatfox|urlhaus|ransomwatch|git|github}
-greynoc-detector correlate
-greynoc-detector predict {run|counterfactual|record-outcome|accuracy|campaigns|forecasts}
-greynoc-detector network {discover|devices|ics}
-greynoc-detector sensor  {run|signals|honeypot}
-greynoc-detector feedback {submit|list}
-greynoc-detector export  {stix|attack-navigator}
-greynoc-detector doctor [sources]
-```
-
-### Security hardening
-
-See `docs/security_review.md` for the full audit. Highlights:
+### Security hardening (`docs/security_review.md`)
 
 - HTTP client: 50 MiB body cap + 5-hop redirect cap.
 - Git clone: `http.followRedirects=false`, per-call random sandbox directory,
@@ -82,21 +66,53 @@ See `docs/security_review.md` for the full audit. Highlights:
   `ics_observations`, `intrusion_signals`, `honeypot_events`,
   `threat_feedback`, `scan_baselines`, `source_health`, `forecast_outcomes`.
 
-### Configuration
-
-- `config/sources.yaml` adds predictive-prior, OSINT-IOC, ransomware-leak,
-  and detection-rule-repository sections, plus a `policy.git_clone` block
-  (opt-in, allowlist required, https-only).
-- `config/scoring.yaml` adds `predictive_fusion_weights` (tunable).
-- New: `config/attack_horizon.yaml`, `config/asset_inventory.example.yaml`.
-
 ### Quality gate
 
-- `ruff check` passes.
-- `ruff format` passes.
-- `mypy --strict` passes on **129 source files**.
-- `pytest`: **91 tests pass** (25 new across security, prediction,
-  network, ICS, spacestation, exporters, migrations, doctor).
+- `ruff check` and `ruff format --check` pass.
+- `mypy --strict` passes on the source tree.
+- `pytest`: 91 tests pass (25 new across security, prediction, network,
+  ICS, spacestation, exporters, migrations, doctor).
+
+## v0.9.0 — 2026-05-18
+
+First near-production evaluation release for the defensive detection-engine
+foundation.
+
+### Added
+
+- Fixture-first CVE, CISA KEV, RSS, and GitHub metadata ingestion.
+- SQLite-backed storage for raw items, CVEs, KEV entries, threats,
+  detections, source runs, and score events.
+- Explainable exploitability, risk, early-warning, AI-abuse, and signal
+  scoring.
+- EPSS enrichment using local fixtures or the FIRST EPSS API when live
+  fetching is deliberately enabled.
+- Detection generation for Sigma, Splunk SPL, Elastic KQL, Microsoft
+  Defender KQL, YARA metadata-only, and Suricata metadata-only outputs.
+- Evidence-gated detection lifecycle workflow for validated and deprecated
+  detection states.
+- Detection export bundles for validated detection handoff.
+- Detection test harness for positive and negative fixture checks.
+- Score-event history API.
+- Signal DNA and detection quality passport intelligence endpoints.
+- FastAPI API, Typer CLI, Docker packaging, and CI quality gates.
+
+### Safety
+
+- Public source content remains untrusted.
+- GitHub monitoring is metadata-only and never clones, downloads, imports,
+  or executes repository code.
+- Generated detections remain drafts until validation evidence supports
+  promotion.
+
+### Known limits at v0.9.0
+
+- SQLite is the production-local backend; Postgres is planned for later
+  multi-user deployment work.
+- CLI coverage was narrower than API coverage for EPSS enrichment, GitHub
+  metadata ingest, exports, and intelligence views.
+- Live fetching is disabled by default and should be enabled only in
+  controlled environments with appropriate host allowlists.
 
 ## v0.1.0
 

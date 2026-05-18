@@ -23,13 +23,13 @@ from greynoc_detector_engine.models.prediction import (
     CampaignCluster,
     EPSSScore,
 )
-from greynoc_detector_engine.models.scoring import ScoreResult
-from greynoc_detector_engine.models.source import SourceItem
+from greynoc_detector_engine.models.scoring import ScoreEvent, ScoreResult
+from greynoc_detector_engine.models.source import SourceItem, SourceRun
 from greynoc_detector_engine.models.threat import ThreatRecord
 from greynoc_detector_engine.spacestation.adaptive import HostBaseline
 from greynoc_detector_engine.storage.base import StorageBackend
 from greynoc_detector_engine.storage.migrations import apply_pending
-from greynoc_detector_engine.utils.time import utc_now
+from greynoc_detector_engine.utils.time import parse_datetime, utc_now
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -71,6 +71,11 @@ class SQLiteStorage(StorageBackend):
                     source_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     message TEXT NOT NULL,
+                    item_count INTEGER NOT NULL DEFAULT 0,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    error_message TEXT,
+                    payload TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS score_events (
@@ -137,8 +142,14 @@ class SQLiteStorage(StorageBackend):
                     ON detections (related_threat_id);
                 CREATE INDEX IF NOT EXISTS idx_raw_items_source
                     ON raw_items (source_id);
+                CREATE INDEX IF NOT EXISTS idx_source_runs_source_created
+                    ON source_runs (source_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_source_runs_status_created
+                    ON source_runs (status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_score_events_target
                     ON score_events (target_id);
+                CREATE INDEX IF NOT EXISTS idx_score_events_type_created
+                    ON score_events (score_type, created_at);
                 CREATE INDEX IF NOT EXISTS idx_attack_forecasts_threat
                     ON attack_forecasts (threat_id);
                 CREATE INDEX IF NOT EXISTS idx_target_likelihoods_threat
@@ -151,6 +162,7 @@ class SQLiteStorage(StorageBackend):
                     ON honeypot_events (listener_port);
                 """
             )
+            self._migrate_source_runs(conn)
             apply_pending(conn)
 
     def upsert_cve(self, record: CVERecord) -> None:
@@ -219,15 +231,48 @@ class SQLiteStorage(StorageBackend):
     def list_source_items(self) -> list[SourceItem]:
         return self.list_raw_items()
 
-    def record_source_run(self, source_id: str, status: str, message: str) -> None:
+    def record_source_run(self, run: SourceRun) -> SourceRun:
+        run_to_store = run.model_copy(update={"run_id": None})
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
-                INSERT INTO source_runs (source_id, status, message, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO source_runs (
+                    source_id, status, message, item_count, started_at, ended_at,
+                    error_message, payload, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (source_id, status, message, utc_now().isoformat()),
+                (
+                    run_to_store.source_id,
+                    run_to_store.status.value,
+                    run_to_store.message,
+                    run_to_store.item_count,
+                    run_to_store.started_at.isoformat(),
+                    run_to_store.ended_at.isoformat(),
+                    run_to_store.error_message,
+                    run_to_store.model_dump_json(),
+                    run_to_store.created_at.isoformat(),
+                ),
             )
+            lastrowid = cursor.lastrowid
+            if lastrowid is None:
+                raise RuntimeError("SQLite did not return a source run id after insert.")
+            run_id = int(lastrowid)
+        return run_to_store.model_copy(update={"run_id": run_id})
+
+    def list_source_runs(self, limit: int = 100) -> list[SourceRun]:
+        bounded_limit = max(1, min(limit, 500))
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT run_id, payload FROM source_runs "
+                "ORDER BY created_at DESC, run_id DESC LIMIT ?",
+                (bounded_limit,),
+            ).fetchall()
+        runs: list[SourceRun] = []
+        for row in rows:
+            run = SourceRun.model_validate_json(row["payload"])
+            runs.append(run.model_copy(update={"run_id": row["run_id"]}))
+        return runs
 
     def upsert_epss(self, score: EPSSScore) -> None:
         self._upsert("epss_scores", "cve_id", score.cve_id, score)
@@ -488,15 +533,100 @@ class SQLiteStorage(StorageBackend):
             conn.execute(
                 """
                 INSERT INTO score_events (target_id, score_type, payload, created_at)
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, datetime('now'))
                 """,
-                (target_id, score_type, score.model_dump_json(), utc_now().isoformat()),
+                (target_id, score_type, score.model_dump_json()),
             )
+
+    def list_score_events(
+        self,
+        *,
+        target_id: str | None = None,
+        score_type: str | None = None,
+        limit: int = 100,
+    ) -> list[ScoreEvent]:
+        bounded_limit = max(1, min(limit, 500))
+        conditions: list[str] = []
+        values: list[object] = []
+        if target_id is not None:
+            conditions.append("target_id = ?")
+            values.append(target_id)
+        if score_type is not None:
+            conditions.append("score_type = ?")
+            values.append(score_type)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        sql = (
+            "SELECT score_event_id, target_id, score_type, payload, created_at "
+            f"FROM score_events {where} "
+            "ORDER BY created_at DESC, score_event_id DESC LIMIT ?"
+        )
+        values.append(bounded_limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, values).fetchall()
+        events: list[ScoreEvent] = []
+        for row in rows:
+            created_at = parse_datetime(row["created_at"])
+            if created_at is None:
+                continue
+            events.append(
+                ScoreEvent(
+                    score_event_id=row["score_event_id"],
+                    target_id=row["target_id"],
+                    score_type=row["score_type"],
+                    score=ScoreResult.model_validate_json(row["payload"]),
+                    created_at=created_at,
+                )
+            )
+        return events
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _migrate_source_runs(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(source_runs)").fetchall()}
+        required = {
+            "item_count": "INTEGER NOT NULL DEFAULT 0",
+            "started_at": "TEXT",
+            "ended_at": "TEXT",
+            "error_message": "TEXT",
+            "payload": "TEXT",
+        }
+        for column, definition in required.items():
+            if column not in columns:
+                conn.execute(f"ALTER TABLE source_runs ADD COLUMN {column} {definition}")
+
+        rows = conn.execute(
+            "SELECT run_id, source_id, status, message, created_at "
+            "FROM source_runs WHERE payload IS NULL"
+        ).fetchall()
+        for row in rows:
+            run = SourceRun(
+                run_id=row["run_id"],
+                source_id=row["source_id"],
+                status=row["status"],
+                message=row["message"],
+                item_count=0,
+                started_at=row["created_at"],
+                ended_at=row["created_at"],
+                created_at=row["created_at"],
+            )
+            conn.execute(
+                """
+                UPDATE source_runs
+                SET item_count = ?, started_at = ?, ended_at = ?, error_message = ?, payload = ?
+                WHERE run_id = ?
+                """,
+                (
+                    run.item_count,
+                    run.started_at.isoformat(),
+                    run.ended_at.isoformat(),
+                    run.error_message,
+                    run.model_dump_json(),
+                    run.run_id,
+                ),
+            )
 
     def _upsert(self, table: str, key_column: str, key_value: str, model: BaseModel) -> None:
         self._upsert_with_extra(table, key_column, key_value, model, extra_columns={})

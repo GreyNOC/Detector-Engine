@@ -6,6 +6,7 @@ from greynoc_detector_engine.enrich.reputation import IndicatorReputation
 from greynoc_detector_engine.models.asset import AssetRecord, TargetLikelihood
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.detection import GeneratedDetection
+from greynoc_detector_engine.models.feedback import ThreatFeedback
 from greynoc_detector_engine.models.kev import KEVRecord
 from greynoc_detector_engine.models.network import (
     HoneypotEvent,
@@ -18,9 +19,10 @@ from greynoc_detector_engine.models.prediction import (
     CampaignCluster,
     EPSSScore,
 )
-from greynoc_detector_engine.models.scoring import ScoreResult
-from greynoc_detector_engine.models.source import SourceItem
+from greynoc_detector_engine.models.scoring import ScoreEvent, ScoreResult
+from greynoc_detector_engine.models.source import SourceItem, SourceRun
 from greynoc_detector_engine.models.threat import ThreatRecord
+from greynoc_detector_engine.spacestation.adaptive import HostBaseline
 
 
 class StorageBackend(Protocol):
@@ -54,9 +56,19 @@ class StorageBackend(Protocol):
 
     def get_detection(self, detection_id: str) -> GeneratedDetection | None: ...
 
-    def record_source_run(self, source_id: str, status: str, message: str) -> None: ...
+    def record_source_run(self, run: SourceRun) -> SourceRun: ...
+
+    def list_source_runs(self, limit: int = 100) -> list[SourceRun]: ...
 
     def record_score_event(self, target_id: str, score_type: str, score: ScoreResult) -> None: ...
+
+    def list_score_events(
+        self,
+        *,
+        target_id: str | None = None,
+        score_type: str | None = None,
+        limit: int = 100,
+    ) -> list[ScoreEvent]: ...
 
     def upsert_epss(self, score: EPSSScore) -> None: ...
 
@@ -101,3 +113,23 @@ class StorageBackend(Protocol):
     def record_honeypot_event(self, event: HoneypotEvent) -> None: ...
 
     def list_honeypot_events(self) -> list[HoneypotEvent]: ...
+
+    def upsert_threat_feedback(self, feedback: ThreatFeedback) -> None: ...
+
+    def list_threat_feedback(self) -> list[ThreatFeedback]: ...
+
+    def upsert_scan_baseline(self, baseline: HostBaseline) -> None: ...
+
+    def list_scan_baselines(self) -> list[HostBaseline]: ...
+
+    def record_forecast_outcome(
+        self,
+        *,
+        threat_id: str,
+        forecast_probability: float,
+        forecast_horizon: str,
+        verified_attack: bool,
+        notes: str = "",
+    ) -> None: ...
+
+    def list_forecast_outcomes(self) -> list[dict[str, object]]: ...

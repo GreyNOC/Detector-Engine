@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from greynoc_detector_engine.api.dependencies import get_storage
+from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
 from greynoc_detector_engine.spacestation.orchestrator import (
     run_discovery_job,
     run_sensor_job,
@@ -12,9 +12,10 @@ from greynoc_detector_engine.spacestation.orchestrator import (
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 
 router = APIRouter(tags=["network"])
+Protected = Depends(require_api_key)
 
 
-@router.post("/network/discover")
+@router.post("/network/discover", dependencies=[Protected])
 def post_discover(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, Any]:
     """Run passive discovery once; persist devices and ICS classifications."""
     try:
@@ -34,7 +35,7 @@ def list_ics_observations(storage: SQLiteStorage = Depends(get_storage)) -> list
     return [o.model_dump(mode="json") for o in storage.list_ics_observations()]
 
 
-@router.post("/sensor/run")
+@router.post("/sensor/run", dependencies=[Protected])
 def post_sensor_run(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, Any]:
     """Run a one-shot connection-table snapshot + scan detection cycle."""
     try:

@@ -13,6 +13,7 @@ from greynoc_detector_engine.detection.generators import DetectionGeneratorSuite
 from greynoc_detector_engine.enrich.asset_context import AssetInventory, TargetLikelihoodScorer
 from greynoc_detector_engine.enrich.epss import EPSSEnricher
 from greynoc_detector_engine.enrich.reputation import IndicatorReputationEngine
+from greynoc_detector_engine.enrichment.epss import EPSSClient, enrich_cves_with_epss
 from greynoc_detector_engine.ingest.cve import CVEIngestor
 from greynoc_detector_engine.ingest.epss import EPSSIngestor
 from greynoc_detector_engine.ingest.git_repository import GitRepositoryIngestor
@@ -23,13 +24,24 @@ from greynoc_detector_engine.ingest.ransomwatch import RansomwatchIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
 from greynoc_detector_engine.ingest.threatfox import ThreatFoxIngestor
 from greynoc_detector_engine.ingest.urlhaus import URLhausIngestor
-from greynoc_detector_engine.models.source import SourceConfig, SourceType
+from greynoc_detector_engine.models.detection import (
+    DetectionStatus,
+    ValidationEvidence,
+    ValidationResult,
+)
+from greynoc_detector_engine.models.source import (
+    SourceConfig,
+    SourceRun,
+    SourceRunStatus,
+    SourceType,
+)
 from greynoc_detector_engine.models.threat import ThreatSeverity
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
 from greynoc_detector_engine.scoring.exploitability import ExploitabilityScorer
 from greynoc_detector_engine.scoring.risk import RiskScorer
 from greynoc_detector_engine.storage.base import StorageBackend
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
+from greynoc_detector_engine.utils.time import utc_now
 
 IngestSourceName = Literal[
     "cve",
@@ -43,6 +55,10 @@ IngestSourceName = Literal[
     "urlhaus",
     "ransomwatch",
 ]
+
+
+class DetectionLifecycleError(ValueError):
+    pass
 
 
 class JobResult(BaseModel):
@@ -88,65 +104,112 @@ def run_ingest_job(
     result = JobResult(job=f"ingest:{source}", counts={"records": 0})
 
     for config in configs:
-        if source == "cve":
-            cve_records = CVEIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for cve_record in cve_records:
-                storage.upsert_cve(cve_record)
-            result.counts["records"] += len(cve_records)
-        elif source == "kev":
-            kev_records = KEVIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for kev_record in kev_records:
-                storage.upsert_kev(kev_record)
-            result.counts["records"] += len(kev_records)
-        elif source == "news":
-            source_items = NewsIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        elif source == "rss":
-            source_items = RSSIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        elif source == "github":
-            source_items = GitHubIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        elif source == "git":
-            source_items = GitRepositoryIngestor(
-                config, settings, fixture_path=fixture_path
-            ).ingest()
-            for source_item in source_items:
-                storage.upsert_raw_item(source_item)
-            result.counts["records"] += len(source_items)
-        elif source == "epss":
-            epss_scores = EPSSIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for epss in epss_scores:
-                storage.upsert_epss(epss)
-            result.counts["records"] += len(epss_scores)
-        elif source == "threatfox":
-            reps = ThreatFoxIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for rep in reps:
-                storage.upsert_indicator_reputation(rep)
-            result.counts["records"] += len(reps)
-        elif source == "urlhaus":
-            reps = URLhausIngestor(config, settings, fixture_path=fixture_path).ingest()
-            for rep in reps:
-                storage.upsert_indicator_reputation(rep)
-            result.counts["records"] += len(reps)
-        elif source == "ransomwatch":
-            posts = RansomwatchIngestor(config, settings, fixture_path=fixture_path).ingest()
-            # Stored only as messages — they feed correlation's ransomware_posts_30d.
-            result.counts["records"] += len(posts)
-            result.messages.append(f"Recorded {len(posts)} ransomware-leak observations.")
-        storage.record_source_run(config.source_id, result.status, f"Ingested {config.source_id}.")
+        started_at = utc_now()
+        item_count = 0
+        try:
+            item_count = _ingest_config(
+                source=source,
+                config=config,
+                settings=settings,
+                storage=storage,
+                fixture_path=fixture_path,
+            )
+        except Exception as exc:
+            ended_at = utc_now()
+            storage.record_source_run(
+                SourceRun(
+                    source_id=config.source_id,
+                    status=SourceRunStatus.FAILED,
+                    message=f"Failed to ingest {config.source_id}.",
+                    item_count=item_count,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    error_message=str(exc),
+                )
+            )
+            result.status = "failed"
+            result.messages.append(f"Failed to ingest {config.source_id}: {exc}")
+            raise
+
+        ended_at = utc_now()
+        storage.record_source_run(
+            SourceRun(
+                source_id=config.source_id,
+                status=SourceRunStatus.OK,
+                message=f"Ingested {config.source_id}.",
+                item_count=item_count,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+        )
+        result.counts["records"] += item_count
         result.messages.append(f"Ingested {config.source_id}.")
 
     if not configs:
         result.status = "skipped"
         result.messages.append(f"No enabled sources configured for {source}.")
     return result
+
+
+def _ingest_config(
+    *,
+    source: IngestSourceName,
+    config: SourceConfig,
+    settings: Settings,
+    storage: StorageBackend,
+    fixture_path: Path | None,
+) -> int:
+    if source == "cve":
+        cve_records = CVEIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for cve_record in cve_records:
+            storage.upsert_cve(cve_record)
+        return len(cve_records)
+    if source == "kev":
+        kev_records = KEVIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for kev_record in kev_records:
+            storage.upsert_kev(kev_record)
+        return len(kev_records)
+    if source == "news":
+        source_items = NewsIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "rss":
+        source_items = RSSIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "github":
+        source_items = GitHubIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "git":
+        source_items = GitRepositoryIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for source_item in source_items:
+            storage.upsert_raw_item(source_item)
+        return len(source_items)
+    if source == "epss":
+        epss_scores = EPSSIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for epss in epss_scores:
+            storage.upsert_epss(epss)
+        return len(epss_scores)
+    if source == "threatfox":
+        reps = ThreatFoxIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for rep in reps:
+            storage.upsert_indicator_reputation(rep)
+        return len(reps)
+    if source == "urlhaus":
+        reps = URLhausIngestor(config, settings, fixture_path=fixture_path).ingest()
+        for rep in reps:
+            storage.upsert_indicator_reputation(rep)
+        return len(reps)
+    if source == "ransomwatch":
+        posts = RansomwatchIngestor(config, settings, fixture_path=fixture_path).ingest()
+        # Posts feed correlation's ransomware_posts_30d aggregate only; we
+        # don't persist them as raw items.
+        return len(posts)
+    return 0
 
 
 def run_correlation_job(
@@ -190,6 +253,26 @@ def run_correlation_job(
             "forecasts": sum(1 for t in report.threats if t.attack_forecast is not None),
         },
         messages=[relationship.reason for relationship in report.relationships[:10]],
+    )
+
+
+def run_epss_enrichment_job(
+    *,
+    settings: Settings,
+    storage: StorageBackend,
+    fixture_path: Path | None = None,
+) -> JobResult:
+    existing_cves = storage.list_cves()
+    epss_records = EPSSClient(settings).load_records(fixture_path=fixture_path)
+    enriched_cves = enrich_cves_with_epss(existing_cves, epss_records)
+    changed = 0
+    for before, after in zip(existing_cves, enriched_cves, strict=True):
+        if before.epss_score != after.epss_score or before.tags != after.tags:
+            storage.upsert_cve(after)
+            changed += 1
+    return JobResult(
+        job="enrich:epss",
+        counts={"cves": len(existing_cves), "epss_records": len(epss_records), "updated": changed},
     )
 
 
@@ -298,6 +381,74 @@ def generate_detections_for_threat(storage: StorageBackend, threat_id: str) -> J
         updated.changelog.append(f"Generated {len(generated)} draft detections.")
     storage.upsert_threat(updated)
     return JobResult(job="generate-detections", counts={"detections": len(generated)})
+
+
+def update_detection_status(
+    storage: StorageBackend,
+    detection_id: str,
+    status: DetectionStatus,
+    *,
+    note: str | None = None,
+    evidence: ValidationEvidence | None = None,
+) -> JobResult:
+    detection = storage.get_detection(detection_id)
+    if detection is None:
+        return JobResult(job="update-detection-status", status="not_found", messages=[detection_id])
+
+    evidence_items = [*detection.validation_evidence]
+    if evidence:
+        evidence_items.append(evidence)
+    _validate_detection_transition(status, note=note, evidence_items=evidence_items)
+
+    updated = detection.model_copy(update={"status": status}, deep=True)
+    if note:
+        updated.validation_steps = [*updated.validation_steps, note]
+    if evidence:
+        updated.validation_evidence = [*updated.validation_evidence, evidence]
+    storage.upsert_detection(updated)
+    return JobResult(
+        job="update-detection-status",
+        counts={"detections": 1},
+        messages=[f"Detection {detection_id} moved to {status.value}."]
+        + ([note] if note else [])
+        + ([evidence.summary] if evidence else []),
+    )
+
+
+def _validate_detection_transition(
+    status: DetectionStatus,
+    *,
+    note: str | None,
+    evidence_items: list[ValidationEvidence],
+) -> None:
+    if status == DetectionStatus.VALIDATED:
+        passed_evidence = [
+            item for item in evidence_items if item.result == ValidationResult.PASSED
+        ]
+        if not passed_evidence:
+            raise DetectionLifecycleError(
+                "Validated detections require at least one passed validation evidence item."
+            )
+        if not any(item.telemetry_source for item in passed_evidence):
+            raise DetectionLifecycleError(
+                "Validated detections require validation evidence with a telemetry source."
+            )
+        if not any(item.reviewer for item in passed_evidence):
+            raise DetectionLifecycleError(
+                "Validated detections require validation evidence with a reviewer."
+            )
+        if not any(
+            item.sample_size is not None and item.sample_size > 0 for item in passed_evidence
+        ):
+            raise DetectionLifecycleError(
+                "Validated detections require validation evidence with a positive sample size."
+            )
+        return
+
+    if status == DetectionStatus.DEPRECATED and not note and not evidence_items:
+        raise DetectionLifecycleError(
+            "Deprecated detections require a note or validation evidence."
+        )
 
 
 def generate_detections_for_all(storage: StorageBackend) -> JobResult:

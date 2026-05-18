@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from greynoc_detector_engine.config.source_registry import SourceRegistry
@@ -23,10 +23,15 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     sources_path: Path = Path("config/sources.yaml")
     scoring_path: Path = Path("config/scoring.yaml")
+    fixture_root: Path = Path("data/fixtures")
     fetch_live: bool = False
     github_token: SecretStr | None = None
+    api_key: SecretStr | None = None
     log_level: str = "INFO"
     request_timeout_seconds: float = 20.0
+    http_retries: int = Field(default=2, ge=0, le=5)
+    max_response_bytes: int = Field(default=5_000_000, ge=1024)
+    allowed_fetch_hosts: list[str] = Field(default_factory=list)
     user_agent: str = "greynoc-detector-engine/0.1 defensive-research"
 
 

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from greynoc_detector_engine.api.dependencies import get_storage
+from greynoc_detector_engine.api.dependencies import get_storage, require_api_key
 from greynoc_detector_engine.exporters import AttackNavigatorExporter, StixExporter
 from greynoc_detector_engine.models.feedback import AnalystVerdict, ThreatFeedback
 from greynoc_detector_engine.prediction.accuracy import compute_accuracy
@@ -18,9 +18,10 @@ from greynoc_detector_engine.prediction.learning import FeedbackTuner
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 
 router = APIRouter(tags=["learning"])
+Protected = Depends(require_api_key)
 
 
-@router.post("/feedback")
+@router.post("/feedback", dependencies=[Protected])
 def submit_feedback(
     payload: dict[str, Any] = Body(...),
     storage: SQLiteStorage = Depends(get_storage),
@@ -60,7 +61,7 @@ def get_accuracy(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, Any
     return compute_accuracy(outcomes).model_dump(mode="json")
 
 
-@router.post("/predict/counterfactual/{threat_id}")
+@router.post("/predict/counterfactual/{threat_id}", dependencies=[Protected])
 def post_counterfactual(
     threat_id: str,
     payload: dict[str, Any] = Body(default_factory=dict),

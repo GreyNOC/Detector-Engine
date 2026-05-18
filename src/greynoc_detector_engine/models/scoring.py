@@ -30,6 +30,16 @@ class ScoreResult(BaseModel):
         return self.score
 
 
+class ScoreEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    score_event_id: int | None = None
+    target_id: str
+    score_type: str
+    score: ScoreResult
+    created_at: datetime
+
+
 def score_label(score: float) -> ScoreLabel:
     if score >= 85:
         return ScoreLabel.CRITICAL
