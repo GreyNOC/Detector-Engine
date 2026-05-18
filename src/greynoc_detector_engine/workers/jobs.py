@@ -15,7 +15,7 @@ from greynoc_detector_engine.ingest.github import GitHubIngestor
 from greynoc_detector_engine.ingest.kev import KEVIngestor
 from greynoc_detector_engine.ingest.news import NewsIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
-from greynoc_detector_engine.models.detection import DetectionStatus
+from greynoc_detector_engine.models.detection import DetectionStatus, ValidationEvidence
 from greynoc_detector_engine.models.source import (
     SourceConfig,
     SourceRun,
@@ -228,6 +228,7 @@ def update_detection_status(
     status: DetectionStatus,
     *,
     note: str | None = None,
+    evidence: ValidationEvidence | None = None,
 ) -> JobResult:
     detection = storage.get_detection(detection_id)
     if detection is None:
@@ -236,11 +237,15 @@ def update_detection_status(
     updated = detection.model_copy(update={"status": status}, deep=True)
     if note:
         updated.validation_steps = [*updated.validation_steps, note]
+    if evidence:
+        updated.validation_evidence = [*updated.validation_evidence, evidence]
     storage.upsert_detection(updated)
     return JobResult(
         job="update-detection-status",
         counts={"detections": 1},
-        messages=[f"Detection {detection_id} moved to {status.value}."] + ([note] if note else []),
+        messages=[f"Detection {detection_id} moved to {status.value}."]
+        + ([note] if note else [])
+        + ([evidence.summary] if evidence else []),
     )
 
 
