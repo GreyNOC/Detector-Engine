@@ -11,6 +11,7 @@ from greynoc_detector_engine.api.routes import (
     operations,
     scores,
     sources,
+    testing,
     threats,
 )
 from greynoc_detector_engine.config.settings import get_settings
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(kev.router)
     app.include_router(detections.router)
     app.include_router(exports.router)
+    app.include_router(testing.router)
     app.include_router(scores.router)
     app.include_router(operations.router)
     return app
