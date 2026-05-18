@@ -30,6 +30,9 @@ class BaseIngestor(ABC, Generic[T]):
         self.http = DefensiveHttpClient(
             timeout_seconds=settings.request_timeout_seconds,
             user_agent=settings.user_agent,
+            retries=settings.http_retries,
+            max_response_bytes=settings.max_response_bytes,
+            allowed_hosts=settings.allowed_fetch_hosts,
         )
 
     @abstractmethod
