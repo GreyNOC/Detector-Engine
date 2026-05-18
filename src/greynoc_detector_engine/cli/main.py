@@ -9,7 +9,11 @@ import typer
 
 from greynoc_detector_engine.config.settings import get_settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
-from greynoc_detector_engine.models.detection import DetectionKind, DetectionStatus, GeneratedDetection
+from greynoc_detector_engine.models.detection import (
+    DetectionKind,
+    DetectionStatus,
+    GeneratedDetection,
+)
 from greynoc_detector_engine.models.threat import ThreatRecord, ThreatSeverity, ThreatStatus
 from greynoc_detector_engine.utils.logging import configure_logging
 from greynoc_detector_engine.workers.jobs import (
@@ -367,7 +371,11 @@ def list_detections(
         parsed_kind = _parse_enum(DetectionKind, kind, "kind")
         detections = [detection for detection in detections if detection.kind == parsed_kind]
     if threat_id is not None:
-        detections = [detection for detection in detections if detection.related_threat_id == threat_id]
+        detections = [
+            detection
+            for detection in detections
+            if detection.related_threat_id == threat_id
+        ]
     detections = detections[:limit]
     payload: Any
     if summary:
