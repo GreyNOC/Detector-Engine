@@ -39,6 +39,7 @@ The engine now has:
 - Explainable exploitability, AI-abuse, early-warning, and risk scoring.
 - Optional enrichment fields for EPSS, exploit maturity, patch availability,
   internet exposure, and asset exposure.
+- EPSS enrichment adapter and enrichment job.
 - Draft detection generation for Sigma, Splunk, Elastic, Defender, YARA
   metadata-only, and Suricata metadata-only formats.
 - Protected mutating API routes using an optional API key.
@@ -46,8 +47,38 @@ The engine now has:
 - Safer HTTP fetching with retries, response-size limits, scheme validation, and
   optional host allowlists.
 - Docker hardening and CI quality gates.
-- A detection lifecycle endpoint to promote detections to validated or
-  deprecated status.
+- A detection lifecycle endpoint that enforces validation gates before a
+  detection can be promoted to `validated`.
+- Structured validation evidence attached to detections.
+- Detection list filtering by status, backend kind, and related threat.
+- Score-event history retrieval.
+- Validated-detection export bundles in JSON or readable text form.
+- A deterministic positive/negative fixture test-harness foundation for
+  detection quality checks.
+
+## Groundbreaking Phase: Evidence-Gated Detection Quality
+
+Goal: make the engine meaningfully different from rule generators by refusing to
+call detections validated until there is evidence.
+
+Implemented baseline:
+
+- Validated detections require at least one passed validation evidence item.
+- Passed validation evidence must include telemetry source, reviewer, and a
+  positive sample size.
+- Deprecated detections require a note or evidence.
+- Detection export bundles default to validated detections only.
+- Detection test reports track positive/negative fixture outcomes and report
+  whether a detection is precision-ready.
+
+Next hardening targets:
+
+- Require precision-ready test reports before promotion to `validated`.
+- Persist detection test reports and link them to validation evidence.
+- Add backend-aware evaluators for Sigma, Splunk SPL, Elastic KQL, Defender KQL,
+  Suricata, and YARA metadata rules.
+- Add false-positive budget thresholds per detection kind.
+- Add telemetry schema mappings and field assumptions per backend.
 
 ## Phase 1: Reliability and Validation Foundation
 
@@ -115,7 +146,7 @@ Deliverables:
 Exit criteria:
 
 - Detections have test evidence.
-- Draft detections cannot be promoted without a validation note or evidence.
+- Draft detections cannot be promoted without passed validation evidence.
 - Generated rules include backend-specific field assumptions and tuning guidance.
 
 ## Phase 4: SOC Workflow Integrations
@@ -172,6 +203,7 @@ Differentiators:
 - Evidence-backed SOC recommendations.
 - Cross-backend rule generation with telemetry requirements and validation steps.
 - A local-first deployment path for sensitive environments.
+- Quality-gated detection promotion and export flows.
 
 ## Metrics That Matter
 
@@ -186,17 +218,17 @@ Track these as product KPIs:
 - Percentage of detections with test fixtures.
 - Analyst acceptance rate.
 - Detections deprecated due to noise or stale logic.
+- Percentage of validated detections with precision-ready test reports.
 
 ## Immediate Next Engineering Backlog
 
-1. Run CI and fix any ruff, mypy, or pytest failures from the latest hardening
-   commits.
-2. Add validation evidence fields to `GeneratedDetection`.
-3. Add an EPSS enrichment adapter and fixture.
-4. Add API filters for detections by status, kind, and threat ID.
-5. Add score-event API endpoints for historical scoring visibility.
+1. Run CI and fix any ruff, mypy, or pytest failures from the latest commits.
+2. Persist detection test reports and expose test history.
+3. Require precision-ready test reports before validation promotion.
+4. Add backend-aware evaluators for Sigma and Splunk first.
+5. Add API pagination for detections, threats, CVEs, and score events.
 6. Add Postgres storage implementation behind the storage protocol.
 7. Add RBAC-ready auth abstraction.
-8. Add export bundles for validated detections.
-9. Add detection test fixture format and runner.
-10. Add a release workflow that builds and tests Docker images.
+8. Add SIEM-specific export packs for validated detections.
+9. Add release workflow that builds and tests Docker images.
+10. Add audit events for all mutating API actions.
