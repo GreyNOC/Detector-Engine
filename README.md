@@ -79,44 +79,60 @@ weaponized payloads, bypass instructions, or abuse-enabling procedures.
 
 ## Quickstart
 
+The preferred shorthand is `gn - <command>`. The `GN - <command>` alias and the
+original `greynoc-detector <command>` entrypoint are also supported.
+
 ```powershell
 python -m pip install -e .[dev]
-greynoc-detector init
+gn - init
 
 # Authoritative + research feeds
-greynoc-detector ingest cve --fixture data/fixtures/cve_sample.json
-greynoc-detector ingest kev --fixture data/fixtures/kev_sample.json
-greynoc-detector ingest rss --fixture data/fixtures/rss_sample.xml
+gn - ingest cve --fixture data/fixtures/cve_sample.json
+gn - ingest kev --fixture data/fixtures/kev_sample.json
+gn - ingest rss --fixture data/fixtures/rss_sample.xml
 
 # Predictive priors and OSINT IOC feeds
-greynoc-detector ingest epss        --fixture data/fixtures/epss_sample.json
-greynoc-detector ingest threatfox   --fixture data/fixtures/threatfox_sample.json
-greynoc-detector ingest urlhaus     --fixture data/fixtures/urlhaus_sample.json
-greynoc-detector ingest ransomwatch --fixture data/fixtures/ransomwatch_sample.json
+gn - ingest epss        --fixture data/fixtures/epss_sample.json
+gn - ingest threatfox   --fixture data/fixtures/threatfox_sample.json
+gn - ingest urlhaus     --fixture data/fixtures/urlhaus_sample.json
+gn - ingest ransomwatch --fixture data/fixtures/ransomwatch_sample.json
 
 # Correlate + predict (forecasts are computed inline)
-greynoc-detector correlate
-greynoc-detector predict run --asset-inventory config/asset_inventory.yaml
-greynoc-detector threats list
-greynoc-detector predict campaigns
+gn - correlate
+gn - predict run --asset-inventory config/asset_inventory.yaml
+gn - threats list
+gn - predict campaigns
 ```
 
 Show a correlated threat:
 
 ```powershell
-greynoc-detector threats show thr-cve-cve-2026-12345
+gn - threats show thr-cve-cve-2026-12345
 ```
 
 Generate draft detections after correlation:
 
 ```powershell
-greynoc-detector detections generate thr-cve-cve-2026-12345
+gn - detections generate thr-cve-cve-2026-12345
 ```
 
 Run the API:
 
 ```powershell
-greynoc-detector serve --host 127.0.0.1 --port 8000
+gn - serve --host 127.0.0.1 --port 8000
+```
+
+Run the loopback-bound darknet listener:
+
+```powershell
+gn - sensor honeypot --port 31337
+```
+
+To intentionally expose the honeypot outside loopback, set both a non-loopback
+bind address and the explicit safety opt-in:
+
+```powershell
+gn - sensor honeypot --bind 0.0.0.0 --port 31337 --allow-external-bind
 ```
 
 ## API Authentication
@@ -252,9 +268,11 @@ correlation without live internet access:
 - `sample_rules_repo/`
 
 Live fetching is disabled by default. Set `GREYNOC_FETCH_LIVE=true` only when
-you intentionally want configured HTTP sources to be queried. API fixture
-paths are constrained to `GREYNOC_DATA_DIR` (or `GREYNOC_FIXTURE_ROOT` /
-`GREYNOC_FIXTURE_DIR` if set) to prevent arbitrary filesystem reads.
+you intentionally want configured HTTP sources to be queried. API ingest
+fixture paths are resolved under `GREYNOC_FIXTURE_ROOT` (default:
+`data/fixtures`) to prevent arbitrary filesystem reads. Prediction asset
+inventory paths accept the configured fixture/data roots and the optional
+`GREYNOC_FIXTURE_DIR` compatibility root.
 
 ## Source Run History and Score History
 
@@ -275,8 +293,8 @@ curl "http://127.0.0.1:8000/scores/events?target_id=thr-cve-cve-2026-12345"
 ## Engine Self-Check (Doctor)
 
 ```powershell
-greynoc-detector doctor          # safety defaults (honeypot bind, HTTP caps)
-greynoc-detector doctor sources  # per-source ingest health
+gn - doctor          # safety defaults (honeypot bind, HTTP caps)
+gn - doctor sources  # per-source ingest health
 ```
 
 ## Configuration
@@ -290,6 +308,7 @@ template.
 
 Important environment variables:
 
+- `GREYNOC_ENV`
 - `GREYNOC_DATABASE_PATH`
 - `GREYNOC_DATA_DIR`
 - `GREYNOC_FIXTURE_ROOT`
@@ -304,14 +323,16 @@ Important environment variables:
 - `GREYNOC_HTTP_RETRIES`
 - `GREYNOC_MAX_RESPONSE_BYTES`
 - `GREYNOC_ALLOWED_FETCH_HOSTS`
+- `GREYNOC_USER_AGENT`
 
 ## Test Commands
 
 ```powershell
-python -m pytest
+python -m pip install -e .[dev]
 ruff check .
 ruff format --check .
 mypy src
+pytest --cov=greynoc_detector_engine --cov-report=term-missing
 ```
 
 ## Docker Usage
