@@ -437,6 +437,159 @@ def show_detection(
     _emit_json(detection.model_dump(mode="json"), pretty=pretty)
 
 
+@detections_app.command("validate")
+def validate_detection(
+    detection_id: str,
+    telemetry_source: str = typer.Option(
+        ...,
+        "--telemetry-source",
+        help="Telemetry source the rule was validated against (e.g. splunk-lab).",
+    ),
+    reviewer: str = typer.Option(
+        ...,
+        "--reviewer",
+        help="Reviewer who validated the detection.",
+    ),
+    sample_size: int = typer.Option(
+        ...,
+        "--sample-size",
+        min=1,
+        help="Number of representative samples evaluated.",
+    ),
+    true_positives: int = typer.Option(
+        ...,
+        "--true-positives",
+        min=0,
+        help="True positives observed during validation.",
+    ),
+    false_positives: int = typer.Option(
+        0,
+        "--false-positives",
+        min=0,
+        help="False positives observed during validation.",
+    ),
+    summary: str = typer.Option(
+        ...,
+        "--summary",
+        help="Short summary or analyst note about the validation evidence.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Validate a draft detection with structured evidence."""
+    from greynoc_detector_engine.models.detection import (
+        ValidationEvidence,
+        ValidationResult,
+    )
+    from greynoc_detector_engine.workers.jobs import (
+        DetectionLifecycleError,
+        update_detection_status,
+    )
+
+    evidence = ValidationEvidence(
+        result=ValidationResult.PASSED,
+        summary=summary,
+        telemetry_source=telemetry_source,
+        sample_size=sample_size,
+        true_positive_count=true_positives,
+        false_positive_count=false_positives,
+        reviewer=reviewer,
+    )
+    storage = build_storage(get_settings())
+    try:
+        result = update_detection_status(
+            storage,
+            detection_id,
+            DetectionStatus.VALIDATED,
+            note=summary,
+            evidence=evidence,
+        )
+    except DetectionLifecycleError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if result.status == "not_found":
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(result.model_dump(mode="json"), pretty=pretty)
+
+
+@detections_app.command("reject")
+def reject_detection(
+    detection_id: str,
+    reviewer: str = typer.Option(
+        ...,
+        "--reviewer",
+        help="Reviewer rejecting the detection.",
+    ),
+    reason: str = typer.Option(
+        ...,
+        "--reason",
+        help="Why the detection is being deprecated (required note).",
+    ),
+    telemetry_source: str | None = typer.Option(
+        None,
+        "--telemetry-source",
+        help="Optional telemetry source consulted while rejecting.",
+    ),
+    sample_size: int | None = typer.Option(
+        None,
+        "--sample-size",
+        min=0,
+        help="Optional sample size consulted while rejecting.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Mark a detection as deprecated with a documented reason."""
+    from greynoc_detector_engine.models.detection import (
+        ValidationEvidence,
+        ValidationResult,
+    )
+    from greynoc_detector_engine.workers.jobs import (
+        DetectionLifecycleError,
+        update_detection_status,
+    )
+
+    evidence = ValidationEvidence(
+        result=ValidationResult.FAILED,
+        summary=reason,
+        reviewer=reviewer,
+        telemetry_source=telemetry_source,
+        sample_size=sample_size,
+    )
+    storage = build_storage(get_settings())
+    try:
+        result = update_detection_status(
+            storage,
+            detection_id,
+            DetectionStatus.DEPRECATED,
+            note=reason,
+            evidence=evidence,
+        )
+    except DetectionLifecycleError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if result.status == "not_found":
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(result.model_dump(mode="json"), pretty=pretty)
+
+
+@detections_app.command("quality")
+def detection_quality(
+    detection_id: str,
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Report the quality passport (grade, trust score, blockers) for a detection."""
+    from greynoc_detector_engine.intelligence.quality_passport import (
+        build_detection_quality_passport,
+    )
+
+    storage = build_storage(get_settings())
+    detection = storage.get_detection(detection_id)
+    if detection is None:
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    passport = build_detection_quality_passport(detection)
+    _emit_json(passport.model_dump(mode="json"), pretty=pretty)
+
+
 @network_app.command("discover")
 def network_discover() -> None:
     """Read the OS ARP / neighbor table; persist devices and ICS classifications."""
