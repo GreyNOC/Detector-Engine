@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.models.source import SourceReference
+from greynoc_detector_engine.utils.time import utc_now
 
 
 class DetectionKind(StrEnum):
@@ -23,6 +25,26 @@ class DetectionStatus(StrEnum):
     DEPRECATED = "deprecated"
 
 
+class ValidationResult(StrEnum):
+    PASSED = "passed"
+    FAILED = "failed"
+    NEEDS_TUNING = "needs_tuning"
+    INFORMATIONAL = "informational"
+
+
+class ValidationEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    result: ValidationResult
+    summary: str = Field(min_length=1, max_length=2000)
+    telemetry_source: str | None = Field(default=None, max_length=200)
+    sample_size: int | None = Field(default=None, ge=0)
+    true_positive_count: int | None = Field(default=None, ge=0)
+    false_positive_count: int | None = Field(default=None, ge=0)
+    reviewer: str | None = Field(default=None, max_length=200)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class GeneratedDetection(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -36,6 +58,7 @@ class GeneratedDetection(BaseModel):
     rule_query: str = Field(validation_alias="query")
     false_positives: list[str] = Field(default_factory=list)
     validation_steps: list[str] = Field(default_factory=list)
+    validation_evidence: list[ValidationEvidence] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     references: list[SourceReference] = Field(default_factory=list)
     confidence: float = Field(default=0.4, ge=0, le=1)
