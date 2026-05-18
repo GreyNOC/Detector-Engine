@@ -137,15 +137,20 @@ gn - sensor honeypot --bind 0.0.0.0 --port 31337 --allow-external-bind
 
 ## API Authentication
 
-Mutating API endpoints are protected when `GREYNOC_API_KEY` is configured. Pass
-the key as an `x-greynoc-api-key` header:
+Mutating API endpoints are open only for local convenience when `GREYNOC_ENV`
+is `local`, `dev`, or `test` and no API key is configured. Outside those
+environments, production fails closed: `GREYNOC_API_KEY` must be set and
+mutating routes require the key in an `x-greynoc-api-key` header.
 
 ```powershell
 curl -H "x-greynoc-api-key: $env:GREYNOC_API_KEY" \
   -X POST "http://127.0.0.1:8000/correlate"
 ```
 
-If `GREYNOC_API_KEY` is unset, local development mode remains open.
+Missing or invalid keys return `401 Unauthorized` outside local/dev/test.
+Expensive duplicate jobs return `409 Conflict` while the same job is already
+running. Collection/list endpoints accept `limit`, default to `100`, and cap at
+`500`.
 
 ## API Examples
 
@@ -154,7 +159,7 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/sources
 curl http://127.0.0.1:8000/threats
 curl http://127.0.0.1:8000/ingest/runs
-curl "http://127.0.0.1:8000/detections?status=draft&kind=sigma"
+curl "http://127.0.0.1:8000/detections?status=draft&kind=sigma&limit=100"
 curl "http://127.0.0.1:8000/exports/detections?status=validated&export_format=json"
 curl "http://127.0.0.1:8000/intelligence/threats/thr-cve-cve-2026-12345/signal-dna"
 curl "http://127.0.0.1:8000/scores/events?target_id=thr-cve-cve-2026-12345&score_type=risk"
@@ -281,13 +286,13 @@ message, item count, start/end timestamps, and error details for failed runs.
 Recent runs are available from:
 
 ```powershell
-curl http://127.0.0.1:8000/ingest/runs
+curl "http://127.0.0.1:8000/ingest/runs?limit=100"
 ```
 
 Each scoring job records score events for later review:
 
 ```powershell
-curl "http://127.0.0.1:8000/scores/events?target_id=thr-cve-cve-2026-12345"
+curl "http://127.0.0.1:8000/scores/events?target_id=thr-cve-cve-2026-12345&limit=100"
 ```
 
 ## Engine Self-Check (Doctor)
@@ -321,7 +326,7 @@ Important environment variables:
 - `GREYNOC_LOG_LEVEL`
 - `GREYNOC_REQUEST_TIMEOUT_SECONDS`
 - `GREYNOC_HTTP_RETRIES`
-- `GREYNOC_MAX_RESPONSE_BYTES`
+- `GREYNOC_MAX_RESPONSE_BYTES` (default `5000000`)
 - `GREYNOC_ALLOWED_FETCH_HOSTS`
 - `GREYNOC_USER_AGENT`
 
@@ -338,11 +343,14 @@ pytest --cov=greynoc_detector_engine --cov-report=term-missing
 ## Docker Usage
 
 ```powershell
+$env:GREYNOC_API_KEY = "replace-with-a-long-random-key"
 docker compose up --build
 ```
 
-The container exposes the FastAPI app on port `8000` and mounts local `data/`
-and `config/`. The container runs as a non-root user and includes a `/health`
+Docker Compose runs with `GREYNOC_ENV=production`, requires
+`GREYNOC_API_KEY`, and publishes the FastAPI app on `127.0.0.1:8000` by
+default. The container still listens on port `8000` internally, mounts local
+`data/` and `config/`, runs as a non-root user, and includes a `/health`
 healthcheck.
 
 ## Current Limits
