@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from greynoc_detection_engine.catalog.deduplication import merge_threats, threat_deduplication_key
-from greynoc_detection_engine.models.threat import ThreatRecord
+from greynoc_detector_engine.catalog.deduplication import merge_threats, threat_deduplication_key
+from greynoc_detector_engine.models.threat import ThreatRecord
 
 
 def test_deduplication_prefers_related_cves() -> None:

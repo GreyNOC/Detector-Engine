@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from greynoc_detection_engine.models.cve import CVERecord
-from greynoc_detection_engine.models.threat import AIAttackType, ThreatRecord
-from greynoc_detection_engine.scoring.early_warning_score import (
+from greynoc_detector_engine.models.cve import CVERecord
+from greynoc_detector_engine.models.threat import AIAttackType, ThreatRecord
+from greynoc_detector_engine.scoring.early_warning import (
     EarlyWarningScorer,
     EarlyWarningSignals,
 )
-from greynoc_detection_engine.scoring.exploitability_score import ExploitabilityScorer
+from greynoc_detector_engine.scoring.exploitability import ExploitabilityScorer
 
 
 def test_exploitability_score_is_explainable() -> None:
@@ -18,6 +18,7 @@ def test_exploitability_score_is_explainable() -> None:
     )
     score = ExploitabilityScorer().score(cve=cve)
     assert score.numeric_score > 40
+    assert score.model_dump()["score"] == score.numeric_score
     assert score.reasons
     assert score.contributing_signals["exploit_reference_count"] == 1
 

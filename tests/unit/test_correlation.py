@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from greynoc_detection_engine.analysis.correlation_engine import CorrelationEngine
-from greynoc_detection_engine.config.settings import Settings
-from greynoc_detection_engine.ingest.cve_ingestor import CVEIngestor
-from greynoc_detection_engine.ingest.kev_ingestor import KEVIngestor
-from greynoc_detection_engine.models.source import SourceCategory, SourceConfig, SourceType
-from greynoc_detection_engine.normalize.normalizer import SourceItemNormalizer
+from greynoc_detector_engine.analysis.correlation import CorrelationEngine
+from greynoc_detector_engine.config.settings import Settings
+from greynoc_detector_engine.ingest.cve import CVEIngestor
+from greynoc_detector_engine.ingest.kev import KEVIngestor
+from greynoc_detector_engine.models.source import SourceCategory, SourceConfig, SourceType
+from greynoc_detector_engine.normalize.normalizer import SourceItemNormalizer
 
 
 def test_correlation_links_cve_kev_and_source_items(tmp_path: Path) -> None:
@@ -33,12 +33,12 @@ def test_correlation_links_cve_kev_and_source_items(tmp_path: Path) -> None:
     cves = CVEIngestor(
         cve_source,
         settings,
-        fixture_path=Path("tests/fixtures/cve_sample.json"),
+        fixture_path=Path("data/fixtures/cve_sample.json"),
     ).ingest()
     kev = KEVIngestor(
         kev_source,
         settings,
-        fixture_path=Path("tests/fixtures/kev_sample.json"),
+        fixture_path=Path("data/fixtures/kev_sample.json"),
     ).ingest()
     item = SourceItemNormalizer().normalize(
         blog_source,

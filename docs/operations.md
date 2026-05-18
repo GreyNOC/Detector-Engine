@@ -5,58 +5,66 @@
 ```powershell
 python -m pip install -e .[dev]
 copy .env.example .env
-greynoc-engine init
+greynoc-detector init
 ```
 
 ## Configuration
 
-Edit `src/greynoc_detection_engine/config/sources.yaml` to add or disable
-sources. Keep secrets in environment variables. Live fetching is disabled until
-`GREYNOC_FETCH_LIVE=true`.
+Root configuration files:
 
-## Ingest Jobs
+- `config/sources.yaml`: source registry and GitHub monitoring keywords.
+- `config/scoring.yaml`: default scoring weights and labels.
+
+Environment variables use the `GREYNOC_` prefix. Live source fetching is off by
+default with `GREYNOC_FETCH_LIVE=false`.
+
+## Fixture Ingest
 
 ```powershell
-greynoc-engine ingest --source cve --fixture tests/fixtures/cve_sample.json
-greynoc-engine ingest --source kev --fixture tests/fixtures/kev_sample.json
-greynoc-engine ingest --source rss --fixture tests/fixtures/rss_sample.xml
+greynoc-detector ingest cve --fixture data/fixtures/cve_sample.json
+greynoc-detector ingest kev --fixture data/fixtures/kev_sample.json
+greynoc-detector ingest rss --fixture data/fixtures/rss_sample.xml
 ```
 
-## Correlation and Scoring
+## Correlation, Scoring, And Detections
 
 ```powershell
-greynoc-engine correlate
-greynoc-engine score
+greynoc-detector correlate
+greynoc-detector score
+greynoc-detector threats list
+greynoc-detector threats show thr-cve-cve-2026-12345
+greynoc-detector detections generate thr-cve-cve-2026-12345
 ```
 
 ## API
 
 ```powershell
-greynoc-engine serve --host 127.0.0.1 --port 8000
+greynoc-detector serve --host 127.0.0.1 --port 8000
 ```
 
-Useful routes:
+Core routes:
 
 - `GET /health`
 - `GET /sources`
 - `GET /threats`
+- `GET /threats/{threat_id}`
 - `GET /cves`
+- `GET /cves/{cve_id}`
 - `GET /kev`
 - `GET /detections`
-- `POST /ingest/run?source=cve&fixture=tests/fixtures/cve_sample.json`
-- `POST /correlate/run`
+- `GET /detections/{detection_id}`
+- `POST /ingest/cve`
+- `POST /ingest/kev`
+- `POST /ingest/rss`
+- `POST /correlate`
+- `POST /detections/generate/{threat_id}`
 
 ## Tests
 
 ```powershell
+python -m pytest
 ruff check .
-pytest
+ruff format --check .
 mypy src
 ```
-
-## Adding Sources
-
-Add a source entry to YAML. If the payload is RSS, CVE JSON, KEV JSON, or GitHub
-repository metadata, existing ingestors can use it. For a new payload format,
-create a `BaseIngestor` subclass and keep fixture coverage.
 

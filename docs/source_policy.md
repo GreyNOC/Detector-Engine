@@ -1,30 +1,31 @@
 # Source Policy
 
-## Configuration
+## Approved Source Types
 
-Sources live in `src/greynoc_detection_engine/config/sources.yaml`. Each source
-declares an ID, name, category, type, URL, enabled flag, reliability, and tags.
-Python code selects sources by type and category instead of hardcoding source
-lists.
+The engine supports defensive metadata ingestion from:
 
-## Stored Metadata
-
-The engine stores source URL, title, source name, author when available,
-published time, fetch time, content hash, confidence, bounded raw excerpt, and
-source-specific metadata such as GitHub stars/forks. Raw untrusted code is not
-stored as executable content.
+- CVE JSON feeds.
+- CISA KEV JSON feeds.
+- RSS feeds for advisories, research, news, and blogs.
+- GitHub repository/search metadata.
+- Local fixtures for offline tests.
 
 ## Unsafe Content Handling
 
-Public exploit references are treated as defensive metadata. The engine records
-that a reference exists and uses that fact for risk scoring, but it does not
-copy exploit instructions into generated detections or execute referenced
-material.
+Exploit references are stored only as defensive signals. The engine may record a
+URL, title, affected product, source confidence, excerpt, hash, and
+exploit-availability context. It does not copy exploit instructions into
+detections.
 
-## GitHub Handling
+## No Untrusted Code Execution
 
-GitHub monitoring collects repository metadata and defensive signals such as CVE
-mentions, detection-rule terms, stars/forks, and recent activity. It does not
-clone repositories, run files, install packages, or inspect code in a way that
-would execute it.
+GitHub monitoring is metadata-only. The engine does not clone repositories,
+download artifacts, execute scripts, install packages, import untrusted modules,
+or run source code from monitored repositories.
+
+## Provenance Requirements
+
+Every raw source item and normalized source reference preserves URL, title,
+source, author when available, published timestamp, fetch timestamp, content
+hash, confidence, and bounded raw excerpt.
 

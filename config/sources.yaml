@@ -1,0 +1,197 @@
+version: 1
+policy:
+  defensive_only: true
+  store_untrusted_code: false
+  execute_untrusted_code: false
+  github_metadata_only: true
+
+government_advisories:
+  - id: cisa-kev-json
+    name: CISA KEV
+    category: kev
+    type: kev_json
+    url: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+    enabled: true
+    reliability: verified
+    tags: [kev, exploited-in-the-wild, government]
+  - id: nvd-cve-json
+    name: NVD CVE
+    category: cve
+    type: cve_json
+    url: https://services.nvd.nist.gov/rest/json/cves/2.0
+    enabled: true
+    reliability: verified
+    tags: [cve, vulnerability, government]
+  - id: cisa-advisories-rss
+    name: CISA Cybersecurity Advisories
+    type: rss
+    url: https://www.cisa.gov/cybersecurity-advisories/all.xml
+    enabled: true
+    reliability: high
+    tags: [rss, government, advisory]
+
+vendor_advisories:
+  - id: microsoft-msrc
+    name: Microsoft Security Response Center
+    type: rss
+    url: https://msrc.microsoft.com/blog/feed
+    enabled: true
+    reliability: high
+    tags: [vendor, microsoft, advisory]
+  - id: cisco-security-advisories
+    name: Cisco Security Advisories
+    type: rss
+    url: https://sec.cloudapps.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisory.xml
+    enabled: true
+    reliability: high
+    tags: [vendor, cisco, advisory]
+  - id: palo-alto-security-advisories
+    name: Palo Alto Security Advisories
+    type: rss
+    url: https://security.paloaltonetworks.com/rss.xml
+    enabled: true
+    reliability: high
+    tags: [vendor, palo-alto, advisory]
+  - id: fortinet-psirt
+    name: Fortinet PSIRT
+    type: rss
+    url: https://www.fortiguard.com/rss/ir.xml
+    enabled: true
+    reliability: high
+    tags: [vendor, fortinet, psirt]
+  - id: vmware-security-advisories
+    name: VMware Security Advisories
+    type: rss
+    url: https://blogs.vmware.com/security/advisories/feed
+    enabled: true
+    reliability: high
+    tags: [vendor, vmware, advisory]
+
+security_research:
+  - id: mandiant
+    name: Mandiant
+    type: rss
+    url: https://cloud.google.com/blog/topics/threat-intelligence/rss
+    enabled: true
+    reliability: high
+    tags: [research, incident-response, threat-intel]
+  - id: unit-42
+    name: Unit 42
+    type: rss
+    url: https://unit42.paloaltonetworks.com/feed
+    enabled: true
+    reliability: high
+    tags: [research, malware, threat-intel]
+  - id: talos
+    name: Talos
+    type: rss
+    url: https://blog.talosintelligence.com/rss
+    enabled: true
+    reliability: high
+    tags: [research, threat-intel]
+  - id: rapid7
+    name: Rapid7
+    type: rss
+    url: https://www.rapid7.com/blog/rss
+    enabled: true
+    reliability: high
+    tags: [research, vulnerability]
+  - id: sophos-xops
+    name: Sophos X-Ops
+    type: rss
+    url: https://news.sophos.com/en-us/category/threat-research/feed/
+    enabled: true
+    reliability: high
+    tags: [research, malware, threat-intel]
+  - id: dfir-report
+    name: The DFIR Report
+    type: rss
+    url: https://thedfirreport.com/feed/
+    enabled: true
+    reliability: high
+    tags: [incident-response, threat-intel]
+
+ai_security:
+  - id: owasp-genai-security
+    name: OWASP GenAI Security
+    type: rss
+    url: https://genai.owasp.org/feed/
+    enabled: false
+    reliability: medium
+    tags: [ai-security, owasp, genai]
+  - id: trail-of-bits-ai
+    name: Trail of Bits AI Security Research
+    type: rss
+    url: https://blog.trailofbits.com/feed/
+    enabled: true
+    reliability: high
+    tags: [ai-security, research]
+  - id: protect-ai
+    name: Protect AI
+    type: rss
+    url: https://protectai.com/blog/rss.xml
+    enabled: false
+    reliability: medium
+    tags: [ai-security, model-security]
+  - id: hiddenlayer
+    name: HiddenLayer
+    type: rss
+    url: https://hiddenlayer.com/feed/
+    enabled: false
+    reliability: medium
+    tags: [ai-security, model-security]
+  - id: lakera
+    name: Lakera
+    type: rss
+    url: https://www.lakera.ai/blog/rss.xml
+    enabled: false
+    reliability: medium
+    tags: [ai-security, prompt-injection]
+  - id: wiz-research
+    name: Wiz Research
+    type: rss
+    url: https://www.wiz.io/blog/rss.xml
+    enabled: true
+    reliability: high
+    tags: [cloud-security, ai-security, research]
+
+github_monitoring:
+  keywords:
+    - CVE
+    - exploit
+    - sigma
+    - yara
+    - suricata
+    - prompt injection
+    - jailbreak
+    - model extraction
+    - RAG poisoning
+    - MCP security
+    - AI agent exploit
+  defensive_keywords:
+    - detection
+    - rule
+    - sigma
+    - yara
+    - suricata
+    - ioc
+    - advisory
+
+ai_attack_terms:
+  - prompt injection
+  - indirect prompt injection
+  - jailbreak
+  - model extraction
+  - data poisoning
+  - training data leakage
+  - RAG poisoning
+  - tool calling abuse
+  - agent hijacking
+  - malicious model
+  - malicious AI package
+  - deepfake
+  - AI phishing
+  - autonomous agent
+  - MCP security
+  - vector database
+

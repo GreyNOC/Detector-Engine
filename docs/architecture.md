@@ -1,70 +1,55 @@
 # Architecture
 
-## Purpose
-
-GreyNOC Detection Engine is a defensive SOC-support framework. It catalogs
-emerging AI-enabled and traditional cyber threats by ingesting trusted public
-metadata, normalizing records, correlating weak signals, scoring risk, and
-generating draft detections for validation.
-
-## Module Layout
-
-- `config`: runtime settings and YAML source registry loading.
-- `models`: Pydantic schemas for sources, CVEs, KEV entries, indicators,
-  threats, scores, and detections.
-- `ingest`: common `BaseIngestor` interface plus CVE, KEV, RSS/news/blog, and
-  GitHub metadata ingestors.
-- `normalize`: source item normalization, entity extraction, and AI attack
-  taxonomy classification.
-- `enrich`: defensive metadata enrichment for references, CVE/KEV context,
-  GitHub metadata, and source reputation.
-- `scoring`: explainable score engines.
-- `catalog`: SQLite storage, threat library, deduplication, and versioning.
-- `analysis`: correlation, trend, narrative, and SOC recommendation engines.
-- `detection`: draft detection generators.
-- `api`: FastAPI routes.
-- `cli`: Typer commands.
-- `workers`: reusable jobs and scheduler construction.
-
 ## Data Flow
 
-Sources are declared in YAML. Ingestors load either a fixture or a configured
-live source, normalize payloads into typed records, and store them locally.
-Correlation links CVEs to KEV entries and source mentions. Scoring engines add
-numeric results with reasons and contributing signals. The catalog stores the
-versioned threat record and draft detections.
+1. Source definitions are loaded from `config/sources.yaml`.
+2. Ingestors fetch local fixtures or live HTTP sources when explicitly enabled.
+3. Raw items, CVEs, and KEV entries are persisted in SQLite.
+4. Normalizers extract entities, CVE references, products, exploit wording, and
+   AI attack taxonomy terms.
+5. The correlation engine links CVEs to KEV entries, source references, AI
+   attack terms, and exploit-availability signals.
+6. Scoring engines produce explainable score objects.
+7. The threat library stores versioned threat records.
+8. Draft detection generators produce validation-ready Sigma, SPL, KQL, YARA
+   metadata, and Suricata metadata outputs.
 
 ## Trust Boundaries
 
-Network sources and GitHub repositories are untrusted. The engine stores
-metadata, excerpts, source hashes, and references only. It does not clone,
-download, import, execute, or transform untrusted code into runnable logic.
+All public source data is untrusted. Source content is treated as evidence for
+defensive triage, not as executable material. GitHub data is metadata-only.
 
-## Defensive Safety Design
+## Module Responsibilities
 
-Exploit references are stored as defensive context: URL, source, affected
-product, exploit-availability status, and scoring evidence. Detection
-generators produce drafts with validation requirements and conservative
-assumptions. YARA and Suricata outputs are metadata-only until validated
-telemetry or samples exist.
+- `config`: environment and YAML loading.
+- `models`: Pydantic v2 schemas.
+- `ingest`: source-specific ingestors behind a common interface.
+- `normalize`: entity extraction and AI attack classification.
+- `analysis`: correlation, trend, and SOC recommendation logic.
+- `scoring`: explainable score engines.
+- `storage`: SQLite backend behind a protocol.
+- `catalog`: threat-library lifecycle, dedupe, and versioning.
+- `detection`: draft detection generators.
+- `api`: FastAPI endpoints.
+- `cli`: Typer commands.
 
-## Provenance
+## Storage Design
 
-Every `SourceItem` and `SourceReference` includes source ID/name, URL, title,
-author when available, publication time, fetch time, content hash, confidence,
-and a bounded raw excerpt.
+SQLite stores `raw_items`, `cves`, `kev_entries`, `threats`, `detections`,
+`source_runs`, and `score_events`. Each domain record is stored as validated
+Pydantic JSON, keeping the first backend simple while preserving a clean
+boundary for a future Postgres implementation.
 
 ## Scoring Explainability
 
-Scores use weighted factors and return a `ScoreResult` containing the numeric
-score, label, reason list, contributing signals, and timestamp. This keeps
-triage decisions inspectable and repeatable.
+Scores return `score`, `label`, `reasons`, `contributing_signals`, and
+`timestamp`. The reason trail is meant to be readable by an analyst and stable
+enough for tests.
 
-## Extension Points
+## Future Extension Points
 
-Add sources in YAML, then implement a `BaseIngestor` subclass only when the
-payload format is new. Add storage backends by implementing `StorageBackend`.
-Add scoring factors by extending the relevant input model and preserving the
-reason trail. Add detection outputs by implementing a generator that returns
-`GeneratedDetection`.
+- Add new ingestors by implementing `BaseIngestor`.
+- Add a Postgres backend by implementing `StorageBackend`.
+- Add source-specific enrichers without changing core models.
+- Promote draft detections only after validation evidence exists.
 

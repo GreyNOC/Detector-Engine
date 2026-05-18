@@ -1,55 +1,100 @@
-# GreyNOC Detection Engine
+# GreyNOC Detector Engine
 
-`greynoc-detection-engine` is a defensive threat-intelligence and SOC-support
-framework. It ingests source metadata, normalizes CVE and CISA KEV records,
-correlates weak signals, produces explainable scores, catalogs threats, and
-generates draft defensive detections.
+GreyNOC Detector Engine is a defensive threat-intelligence and detection-engine
+platform for SOC operators, defenders, vulnerability analysts, and detection
+engineers.
 
-The project deliberately stores defensive metadata only. It does not download,
-execute, or generate exploit code, malware, credential-theft logic, persistence
-logic, or abuse instructions.
+It ingests public CVE, CISA KEV, RSS/advisory/blog, news, and GitHub metadata;
+normalizes source records; correlates weak signals; tracks AI-enabled attack
+taxonomy terms; scores exploitability and early-warning signals; catalogs
+threats in a local SQLite-backed library; and generates explainable draft
+detections for SOC validation.
 
-## Current implementation slice
+## What It Does Not Do
 
-- Pydantic v2 models for sources, CVEs, KEV entries, threats, indicators,
-  detections, and explainable score results.
-- YAML source registry in `src/greynoc_detection_engine/config/sources.yaml`.
-- SQLite storage abstraction with catalog operations.
-- Fixture-capable CVE and KEV ingestors.
-- RSS/news/blog and GitHub metadata ingestor frameworks.
-- Explainable risk, exploitability, AI-abuse, signal, and early-warning scores.
-- Correlation pipeline that links CVEs, KEV entries, source mentions, and AI
-  attack taxonomy hits.
-- Draft Sigma, YARA metadata, Suricata metadata, Splunk SPL, Elastic KQL, and
-  Microsoft Defender KQL generators.
-- FastAPI routes and Typer CLI commands.
-- Unit and integration tests for the first working pipeline.
+This is not an offensive tool. It does not generate exploit code, malware,
+credential-theft logic, persistence techniques, unauthorized scanning,
+weaponized payloads, bypass instructions, or abuse-enabling procedures. GitHub
+monitoring stores metadata only and never clones, downloads, installs, imports,
+or executes untrusted code.
 
-## Quick start
+## Quickstart
 
 ```powershell
 python -m pip install -e .[dev]
-greynoc-engine init
-greynoc-engine ingest --source cve --fixture tests/fixtures/cve_sample.json
-greynoc-engine ingest --source kev --fixture tests/fixtures/kev_sample.json
-greynoc-engine correlate
-greynoc-engine generate-detections
-greynoc-engine serve
+greynoc-detector init
+greynoc-detector ingest cve --fixture data/fixtures/cve_sample.json
+greynoc-detector ingest kev --fixture data/fixtures/kev_sample.json
+greynoc-detector ingest rss --fixture data/fixtures/rss_sample.xml
+greynoc-detector correlate
+greynoc-detector score
+greynoc-detector threats list
 ```
 
-Run checks:
+Generate draft detections after correlation:
 
 ```powershell
+greynoc-detector detections generate thr-cve-cve-2026-12345
+```
+
+Run the API:
+
+```powershell
+greynoc-detector serve --host 127.0.0.1 --port 8000
+```
+
+## API Examples
+
+```powershell
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/sources
+curl http://127.0.0.1:8000/threats
+curl -X POST "http://127.0.0.1:8000/ingest/cve?fixture=data/fixtures/cve_sample.json"
+curl -X POST "http://127.0.0.1:8000/correlate"
+```
+
+## Local Fixture Workflow
+
+Fixtures in `data/fixtures/` let developers test ingest and correlation without
+live internet access:
+
+- `cve_sample.json`
+- `kev_sample.json`
+- `rss_sample.xml`
+- `github_sample.json`
+
+Live fetching is disabled by default. Set `GREYNOC_FETCH_LIVE=true` only when
+you intentionally want configured HTTP sources to be queried.
+
+## Test Commands
+
+```powershell
+python -m pytest
 ruff check .
-pytest
+ruff format --check .
 mypy src
 ```
 
-## Safety posture
+## Docker Usage
 
-The engine treats public exploit references as signals for defenders. It stores
-URL/title/source metadata, affected products, exploit-availability context,
-indicators, risk reasoning, and detection guidance. It does not clone or execute
-untrusted repositories, and draft detections are marked unvalidated until tested
-against known-good telemetry.
+```powershell
+docker compose up --build
+```
+
+The container exposes the FastAPI app on port `8000` and mounts local `data/`
+and `config/`.
+
+## Source Configuration
+
+Source policy and seed registries live in `config/sources.yaml`. Scoring defaults
+live in `config/scoring.yaml`. Secrets and local paths should be supplied by
+environment variables or `.env`, using `.env.example` as a template.
+
+## Roadmap
+
+- Add richer source-run history views and API endpoints.
+- Add Postgres storage backend behind the existing storage protocol.
+- Add authenticated GitHub search adapter with rate-limit handling.
+- Add asset inventory and affected-product popularity enrichment.
+- Add validation workflows for promoting draft detections to validated status.
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from greynoc_detection_engine.models.cve import CVERecord
-from greynoc_detection_engine.models.threat import AIAttackType, ThreatRecord
+from greynoc_detector_engine.models.cve import CVERecord
+from greynoc_detector_engine.models.threat import AIAttackType, ThreatRecord
 
 
 def test_cve_model_validates_identifier() -> None:

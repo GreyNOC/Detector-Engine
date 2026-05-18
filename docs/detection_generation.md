@@ -1,9 +1,9 @@
 # Detection Generation
 
 Detection generation creates drafts only. Each `GeneratedDetection` includes a
-title, description, status, required logs, query or rule body, false-positive
-notes, validation steps, assumptions, references, related threat ID, and
-confidence.
+title, description, status, required telemetry, rule/query body,
+false-positive notes, validation steps, assumptions, references, related threat
+ID, and confidence.
 
 Supported draft outputs:
 
@@ -16,4 +16,3 @@ Supported draft outputs:
 
 Drafts must be validated with representative benign telemetry and confirmed
 attack telemetry before production deployment.
-

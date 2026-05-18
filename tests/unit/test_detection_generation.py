@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from greynoc_detection_engine.detection.generators import DetectionGeneratorSuite
-from greynoc_detection_engine.models.threat import ThreatRecord
+from greynoc_detector_engine.detection.generators import DetectionGeneratorSuite
+from greynoc_detector_engine.models.threat import ThreatRecord
 
 
 def test_detection_suite_generates_drafts_only() -> None:
@@ -22,4 +22,6 @@ def test_detection_suite_generates_drafts_only() -> None:
         "defender",
     }
     assert all(detection.status == "draft" for detection in detections)
+    assert all(detection.required_telemetry for detection in detections)
+    assert all(detection.rule_query for detection in detections)
     assert "condition:\n        false" in detections[1].query

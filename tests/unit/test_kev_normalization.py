@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from greynoc_detection_engine.config.settings import Settings
-from greynoc_detection_engine.ingest.kev_ingestor import KEVIngestor
-from greynoc_detection_engine.models.source import SourceCategory, SourceConfig, SourceType
+from greynoc_detector_engine.config.settings import Settings
+from greynoc_detector_engine.ingest.kev import KEVIngestor
+from greynoc_detector_engine.models.source import SourceCategory, SourceConfig, SourceType
 
 
 def test_kev_ingestor_normalizes_cisa_fixture(tmp_path: Path) -> None:
@@ -18,7 +18,7 @@ def test_kev_ingestor_normalizes_cisa_fixture(tmp_path: Path) -> None:
     records = KEVIngestor(
         source,
         Settings(database_path=tmp_path / "test.sqlite"),
-        fixture_path=Path("tests/fixtures/kev_sample.json"),
+        fixture_path=Path("data/fixtures/kev_sample.json"),
     ).ingest()
 
     assert len(records) == 1

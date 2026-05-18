@@ -1,0 +1,19 @@
+version: 1
+early_warning_weights:
+  kev_presence: 16
+  cvss_severity: 12
+  exploit_references: 12
+  trusted_source_mentions: 10
+  news_rss_velocity: 10
+  github_metadata_references: 10
+  ransomware_association: 8
+  ai_relevance: 6
+  vendor_emergency_language: 5
+  independent_source_count: 3
+  recency: 2
+labels:
+  low: [0, 39]
+  medium: [40, 69]
+  high: [70, 84]
+  critical: [85, 100]
+
