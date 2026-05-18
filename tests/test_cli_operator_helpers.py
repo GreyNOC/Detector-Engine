@@ -9,7 +9,11 @@ from greynoc_detector_engine.cli.main import (
     _parse_enum,
     _threat_priority_sort_key,
 )
-from greynoc_detector_engine.models.detection import DetectionKind, DetectionStatus, GeneratedDetection
+from greynoc_detector_engine.models.detection import (
+    DetectionKind,
+    DetectionStatus,
+    GeneratedDetection,
+)
 from greynoc_detector_engine.models.threat import ThreatSeverity
 
 
