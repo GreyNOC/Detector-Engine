@@ -1,0 +1,12 @@
+services:
+  greynoc-detection-engine:
+    build: .
+    environment:
+      GREYNOC_DATABASE_PATH: /app/data/threat_library/greynoc_detection_engine.sqlite
+      GREYNOC_SOURCES_PATH: /app/src/greynoc_detection_engine/config/sources.yaml
+      GREYNOC_FETCH_LIVE: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+
