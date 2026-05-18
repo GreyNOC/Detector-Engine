@@ -15,6 +15,7 @@ from greynoc_detector_engine.ingest.github import GitHubIngestor
 from greynoc_detector_engine.ingest.kev import KEVIngestor
 from greynoc_detector_engine.ingest.news import NewsIngestor
 from greynoc_detector_engine.ingest.rss import RSSIngestor
+from greynoc_detector_engine.models.detection import DetectionStatus
 from greynoc_detector_engine.models.source import SourceConfig, SourceRun, SourceRunStatus, SourceType
 from greynoc_detector_engine.models.threat import ThreatSeverity
 from greynoc_detector_engine.scoring.ai_attack_score import AIAttackScorer
@@ -214,6 +215,29 @@ def generate_detections_for_threat(storage: StorageBackend, threat_id: str) -> J
         updated.changelog.append(f"Generated {len(generated)} draft detections.")
     storage.upsert_threat(updated)
     return JobResult(job="generate-detections", counts={"detections": len(generated)})
+
+
+def update_detection_status(
+    storage: StorageBackend,
+    detection_id: str,
+    status: DetectionStatus,
+    *,
+    note: str | None = None,
+) -> JobResult:
+    detection = storage.get_detection(detection_id)
+    if detection is None:
+        return JobResult(job="update-detection-status", status="not_found", messages=[detection_id])
+
+    updated = detection.model_copy(update={"status": status}, deep=True)
+    if note:
+        updated.validation_steps = [*updated.validation_steps, note]
+    storage.upsert_detection(updated)
+    return JobResult(
+        job="update-detection-status",
+        counts={"detections": 1},
+        messages=[f"Detection {detection_id} moved to {status.value}."]
+        + ([note] if note else []),
+    )
 
 
 def generate_detections_for_all(storage: StorageBackend) -> JobResult:
