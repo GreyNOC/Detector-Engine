@@ -20,6 +20,7 @@ from greynoc_detector_engine.workers.jobs import (
     build_storage,
     generate_detections_for_threat,
     initialize_project,
+    record_job,
     run_correlation_job,
     run_ingest_job,
     run_predict_job,
@@ -50,6 +51,8 @@ sensor_app = typer.Typer(help="Spacestation: lightweight intrusion sensor + dark
 feedback_app = typer.Typer(help="Submit analyst feedback that re-tunes predictive weights.")
 export_app = typer.Typer(help="Export the threat library to STIX 2.1 or ATT&CK Navigator.")
 doctor_app = typer.Typer(help="Engine self-diagnostic: safety defaults + source health.")
+workflow_app = typer.Typer(help="Repeatable operator workflows (golden path demo, etc.).")
+jobs_app = typer.Typer(help="Inspect orchestrated worker job history.")
 
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(threats_app, name="threats")
@@ -60,6 +63,8 @@ app.add_typer(sensor_app, name="sensor")
 app.add_typer(feedback_app, name="feedback")
 app.add_typer(export_app, name="export")
 app.add_typer(doctor_app, name="doctor")
+app.add_typer(workflow_app, name="workflow")
+app.add_typer(jobs_app, name="jobs")
 
 
 @app.callback()
@@ -72,6 +77,72 @@ def main() -> None:
 def init_command() -> None:
     result = initialize_project(get_settings())
     typer.echo(result.model_dump_json())
+
+
+@jobs_app.command("list")
+def jobs_list(
+    job_type: str | None = typer.Option(
+        None, "--job-type", help="Filter by job type (e.g. ingest:cve)."
+    ),
+    limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List recent job-history entries (most recent first)."""
+    storage = build_storage(get_settings())
+    entries = storage.list_job_history(job_type=job_type, limit=limit)
+    _emit_json([entry.model_dump(mode="json") for entry in entries], pretty=pretty)
+
+
+@jobs_app.command("show")
+def jobs_show(
+    job_id: str,
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show one job-history entry by job_id."""
+    storage = build_storage(get_settings())
+    entry = storage.get_job_history(job_id)
+    if entry is None:
+        typer.echo(f"Job not found: {job_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(entry.model_dump(mode="json"), pretty=pretty)
+
+
+@workflow_app.command("demo")
+def workflow_demo(
+    fixture_root: Path | None = typer.Option(
+        None,
+        "--fixture-root",
+        exists=True,
+        readable=True,
+        file_okay=False,
+        dir_okay=True,
+        help="Override the directory containing fixture sources.",
+    ),
+    skip_detections: bool = typer.Option(
+        False,
+        "--skip-detections",
+        help="Skip the draft-detection generation step.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Run the local golden-path workflow against bundled fixtures.
+
+    Fully offline by default. The command initializes local paths, ingests
+    fixture-backed sources, correlates weak signals, runs the predictive
+    layer, and (unless ``--skip-detections``) generates draft detections.
+    It prints a compact JSON summary at the end.
+    """
+    from greynoc_detector_engine.workers.workflow import run_workflow_demo
+
+    settings = get_settings()
+    report = run_workflow_demo(
+        settings,
+        fixture_root=fixture_root,
+        generate_detections=not skip_detections,
+    )
+    _emit_json(report.model_dump(mode="json"), pretty=pretty)
+    if report.status == "failed":
+        raise typer.Exit(1)
 
 
 @app.command("status")
@@ -205,7 +276,10 @@ def ingest_all(
     failed = False
     for source in sources:
         try:
-            result = run_ingest_job(source=source, settings=settings, storage=storage)
+            with record_job(storage, f"ingest:{source}") as summary:
+                result = run_ingest_job(source=source, settings=settings, storage=storage)
+                summary.update(result.counts)
+                summary["status"] = result.status
             results.append(result.model_dump(mode="json"))
         except Exception as exc:
             failed = True
@@ -222,15 +296,19 @@ def ingest_all(
 def correlate_command(
     ransomware_posts_30d: int = typer.Option(0, "--ransomware-posts-30d"),
 ) -> None:
-    result = run_correlation_job(
-        build_storage(get_settings()), ransomware_posts_30d=ransomware_posts_30d
-    )
+    storage = build_storage(get_settings())
+    with record_job(storage, "correlate") as summary:
+        result = run_correlation_job(storage, ransomware_posts_30d=ransomware_posts_30d)
+        summary.update(result.counts)
     typer.echo(result.model_dump_json())
 
 
 @app.command("score")
 def score_command() -> None:
-    result = run_score_job(build_storage(get_settings()))
+    storage = build_storage(get_settings())
+    with record_job(storage, "score") as summary:
+        result = run_score_job(storage)
+        summary.update(result.counts)
     typer.echo(result.model_dump_json())
 
 
@@ -249,11 +327,14 @@ def predict_run(
         help="Recompute every forecast even when the stored input fingerprint is unchanged.",
     ),
 ) -> None:
-    result = run_predict_job(
-        build_storage(get_settings()),
-        asset_inventory_path=asset_inventory,
-        force=force,
-    )
+    storage = build_storage(get_settings())
+    with record_job(storage, "predict") as summary:
+        result = run_predict_job(
+            storage,
+            asset_inventory_path=asset_inventory,
+            force=force,
+        )
+        summary.update(result.counts)
     typer.echo(result.model_dump_json())
 
 
@@ -381,9 +462,7 @@ def list_detections(
         detections = [detection for detection in detections if detection.kind == parsed_kind]
     if threat_id is not None:
         detections = [
-            detection
-            for detection in detections
-            if detection.related_threat_id == threat_id
+            detection for detection in detections if detection.related_threat_id == threat_id
         ]
     detections = detections[:limit]
     payload: Any
@@ -406,6 +485,159 @@ def show_detection(
         typer.echo(f"Detection not found: {detection_id}", err=True)
         raise typer.Exit(1)
     _emit_json(detection.model_dump(mode="json"), pretty=pretty)
+
+
+@detections_app.command("validate")
+def validate_detection(
+    detection_id: str,
+    telemetry_source: str = typer.Option(
+        ...,
+        "--telemetry-source",
+        help="Telemetry source the rule was validated against (e.g. splunk-lab).",
+    ),
+    reviewer: str = typer.Option(
+        ...,
+        "--reviewer",
+        help="Reviewer who validated the detection.",
+    ),
+    sample_size: int = typer.Option(
+        ...,
+        "--sample-size",
+        min=1,
+        help="Number of representative samples evaluated.",
+    ),
+    true_positives: int = typer.Option(
+        ...,
+        "--true-positives",
+        min=0,
+        help="True positives observed during validation.",
+    ),
+    false_positives: int = typer.Option(
+        0,
+        "--false-positives",
+        min=0,
+        help="False positives observed during validation.",
+    ),
+    summary: str = typer.Option(
+        ...,
+        "--summary",
+        help="Short summary or analyst note about the validation evidence.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Validate a draft detection with structured evidence."""
+    from greynoc_detector_engine.models.detection import (
+        ValidationEvidence,
+        ValidationResult,
+    )
+    from greynoc_detector_engine.workers.jobs import (
+        DetectionLifecycleError,
+        update_detection_status,
+    )
+
+    evidence = ValidationEvidence(
+        result=ValidationResult.PASSED,
+        summary=summary,
+        telemetry_source=telemetry_source,
+        sample_size=sample_size,
+        true_positive_count=true_positives,
+        false_positive_count=false_positives,
+        reviewer=reviewer,
+    )
+    storage = build_storage(get_settings())
+    try:
+        result = update_detection_status(
+            storage,
+            detection_id,
+            DetectionStatus.VALIDATED,
+            note=summary,
+            evidence=evidence,
+        )
+    except DetectionLifecycleError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if result.status == "not_found":
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(result.model_dump(mode="json"), pretty=pretty)
+
+
+@detections_app.command("reject")
+def reject_detection(
+    detection_id: str,
+    reviewer: str = typer.Option(
+        ...,
+        "--reviewer",
+        help="Reviewer rejecting the detection.",
+    ),
+    reason: str = typer.Option(
+        ...,
+        "--reason",
+        help="Why the detection is being deprecated (required note).",
+    ),
+    telemetry_source: str | None = typer.Option(
+        None,
+        "--telemetry-source",
+        help="Optional telemetry source consulted while rejecting.",
+    ),
+    sample_size: int | None = typer.Option(
+        None,
+        "--sample-size",
+        min=0,
+        help="Optional sample size consulted while rejecting.",
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Mark a detection as deprecated with a documented reason."""
+    from greynoc_detector_engine.models.detection import (
+        ValidationEvidence,
+        ValidationResult,
+    )
+    from greynoc_detector_engine.workers.jobs import (
+        DetectionLifecycleError,
+        update_detection_status,
+    )
+
+    evidence = ValidationEvidence(
+        result=ValidationResult.FAILED,
+        summary=reason,
+        reviewer=reviewer,
+        telemetry_source=telemetry_source,
+        sample_size=sample_size,
+    )
+    storage = build_storage(get_settings())
+    try:
+        result = update_detection_status(
+            storage,
+            detection_id,
+            DetectionStatus.DEPRECATED,
+            note=reason,
+            evidence=evidence,
+        )
+    except DetectionLifecycleError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if result.status == "not_found":
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    _emit_json(result.model_dump(mode="json"), pretty=pretty)
+
+
+@detections_app.command("quality")
+def detection_quality(
+    detection_id: str,
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Report the quality passport (grade, trust score, blockers) for a detection."""
+    from greynoc_detector_engine.intelligence.quality_passport import (
+        build_detection_quality_passport,
+    )
+
+    storage = build_storage(get_settings())
+    detection = storage.get_detection(detection_id)
+    if detection is None:
+        typer.echo(f"Detection not found: {detection_id}", err=True)
+        raise typer.Exit(1)
+    passport = build_detection_quality_passport(detection)
+    _emit_json(passport.model_dump(mode="json"), pretty=pretty)
 
 
 @network_app.command("discover")
@@ -732,12 +964,15 @@ def _run_ingest(source: IngestCliSource, fixture: Path | None) -> None:
     settings = get_settings()
     storage = build_storage(settings)
     try:
-        result = run_ingest_job(
-            source=source,
-            settings=settings,
-            storage=storage,
-            fixture_path=fixture,
-        )
+        with record_job(storage, f"ingest:{source}") as summary:
+            result = run_ingest_job(
+                source=source,
+                settings=settings,
+                storage=storage,
+                fixture_path=fixture,
+            )
+            summary.update(result.counts)
+            summary["status"] = result.status
     except IngestSourceUnavailable as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(result.model_dump_json())

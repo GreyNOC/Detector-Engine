@@ -14,7 +14,7 @@ from greynoc_detector_engine.api.pagination import DEFAULT_LIMIT, LimitParam, ap
 from greynoc_detector_engine.api.safety import validate_fixture_path
 from greynoc_detector_engine.config.settings import Settings
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
-from greynoc_detector_engine.workers.jobs import run_predict_job
+from greynoc_detector_engine.workers.jobs import record_job, run_predict_job
 
 router = APIRouter(tags=["predictions"])
 Protected = Depends(require_api_key)
@@ -29,8 +29,9 @@ def run_prediction(
 ) -> dict[str, Any]:
     """Re-run the predictive layer against existing stored threats."""
     inv = validate_fixture_path(asset_inventory, settings)
-    with single_running_job("predict:run"):
+    with single_running_job("predict:run"), record_job(storage, "predict") as summary:
         result = run_predict_job(storage, asset_inventory_path=inv, force=force)
+        summary.update(result.counts)
     return result.model_dump(mode="json")
 
 

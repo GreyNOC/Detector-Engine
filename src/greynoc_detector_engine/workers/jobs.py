@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +37,7 @@ from greynoc_detector_engine.models.detection import (
     ValidationEvidence,
     ValidationResult,
 )
+from greynoc_detector_engine.models.job import JobHistoryEntry, JobStatus
 from greynoc_detector_engine.models.prediction import ForecastRun
 from greynoc_detector_engine.models.source import (
     SourceConfig,
@@ -89,6 +92,43 @@ def build_storage(settings: Settings) -> SQLiteStorage:
     storage = SQLiteStorage(settings.database_path)
     storage.initialize()
     return storage
+
+
+@contextmanager
+def record_job(storage: StorageBackend, job_type: str) -> Iterator[dict[str, Any]]:
+    """Record a job-history row around a worker call.
+
+    The yielded dict is mutated by the caller to populate result_summary.
+    On a clean exit the entry is marked completed; on exception it is
+    marked failed with the exception's message. The exception is then
+    re-raised so existing callers keep their behavior.
+    """
+
+    entry = JobHistoryEntry(job_type=job_type, status=JobStatus.RUNNING)
+    storage.upsert_job_history(entry)
+    summary: dict[str, Any] = {}
+    try:
+        yield summary
+    except Exception as exc:
+        finished = utc_now()
+        failure = entry.model_copy(
+            update={
+                "status": JobStatus.FAILED,
+                "finished_at": finished,
+                "error": str(exc),
+                "result_summary": summary,
+            }
+        )
+        storage.upsert_job_history(failure)
+        raise
+    completion = entry.model_copy(
+        update={
+            "status": JobStatus.COMPLETED,
+            "finished_at": utc_now(),
+            "result_summary": summary,
+        }
+    )
+    storage.upsert_job_history(completion)
 
 
 def initialize_project(settings: Settings) -> JobResult:

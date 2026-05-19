@@ -18,6 +18,7 @@ from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
 from greynoc_detector_engine.workers.jobs import (
     IngestSourceName,
+    record_job,
     run_correlation_job,
     run_epss_enrichment_job,
     run_ingest_job,
@@ -83,12 +84,14 @@ def enrich_epss(
     settings: Settings = Depends(get_app_settings),
     storage: SQLiteStorage = Depends(get_storage),
 ) -> dict[str, object]:
-    with single_running_job("enrich:epss"):
-        return run_epss_enrichment_job(
+    with single_running_job("enrich:epss"), record_job(storage, "enrich:epss") as summary:
+        result = run_epss_enrichment_job(
             settings=settings,
             storage=storage,
             fixture_path=fixture_path,
-        ).model_dump(mode="json")
+        )
+        summary.update(result.counts)
+    return result.model_dump(mode="json")
 
 
 @router.post("/correlate/run", dependencies=[Protected])
@@ -102,8 +105,10 @@ def correlate(storage: SQLiteStorage = Depends(get_storage)) -> dict[str, object
 
 
 def _run_correlation(storage: SQLiteStorage) -> dict[str, object]:
-    with single_running_job("correlate"):
-        return run_correlation_job(storage).model_dump(mode="json")
+    with single_running_job("correlate"), record_job(storage, "correlate") as summary:
+        result = run_correlation_job(storage)
+        summary.update(result.counts)
+    return result.model_dump(mode="json")
 
 
 def _ingest_source(
@@ -112,14 +117,17 @@ def _ingest_source(
     settings: Settings,
     storage: SQLiteStorage,
 ) -> dict[str, object]:
+    job_type = f"ingest:{source}"
     try:
-        with single_running_job(f"ingest:{source}"):
+        with single_running_job(job_type), record_job(storage, job_type) as summary:
             result = run_ingest_job(
                 source=source,
                 settings=settings,
                 storage=storage,
                 fixture_path=fixture_path,
             )
+            summary.update(result.counts)
+            summary["status"] = result.status
     except IngestSourceUnavailable as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result.model_dump(mode="json")

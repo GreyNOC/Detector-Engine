@@ -1,5 +1,58 @@
 # Changelog
 
+## v1.0.0 — Advanced tool, operator-grade workflow
+
+The 1.0 release moves the engine from advanced prototype to advanced
+SOC-support tool. It keeps the existing defensive-only safety boundary
+intact while making the operator workflow repeatable, auditable, and
+evidence-gated.
+
+### Highlights
+
+- **Golden-path demo (`gn workflow demo`).** A single command initializes
+  local paths, ingests every bundled fixture source it can find,
+  correlates, runs the predictive layer, drafts detections, and prints a
+  compact JSON report. Fully offline by default; no network access
+  required.
+- **Detection validation lifecycle on the CLI.** `gn detections validate`
+  refuses to validate without structured evidence (telemetry source,
+  reviewer, sample size, true/false positive counts, summary).
+  `gn detections reject` deprecates a rule with a documented reason.
+  `gn detections quality` reports the quality passport (grade, trust
+  score, blockers, strengths).
+- **Job history audit trail.** Every orchestrated worker run (ingest,
+  correlate, predict, score, generate-detections, workflow demo) is
+  captured in a new `job_history` SQLite table via a `record_job`
+  context manager. Surfaced through `gn jobs list / show` and the
+  `GET /jobs` and `GET /jobs/{id}` API routes. CLI and API runs share
+  the same audit trail.
+- **API/CLI list-limit consistency.** All list commands default to 100
+  results and cap at 500, with clear validation errors on out-of-range
+  values.
+- **Forecasting performance pipeline.** Calibrated prediction with input
+  fingerprinting skips recomputation when inputs haven't changed
+  (override with `--force`). New `forecast_runs` and
+  `prediction_fingerprints` tables.
+- **Documentation refresh.** `docs/cli_operator_guide.md` documents the
+  full operator workflow; `docs/advanced_tool_roadmap.md` records the
+  advanced-vs-future-work boundary; README quickstart leads with the
+  golden-path demo.
+
+### CI / quality
+
+- Ruff format check, ruff lint, strict mypy, and pytest (with coverage)
+  all green on every commit.
+- 164 tests pass (up from 128 at v0.9.1); coverage 78%.
+- Pytest `tests/__init__.py` added so the prediction-performance test
+  can import shared fixtures cleanly.
+
+### Defensive boundary (unchanged)
+
+- No exploit / payload / offensive-scanning / evasion / persistence
+  capability has been added or relaxed in this release. Detection
+  generation remains draft / review-focused with structured evidence
+  required for validation.
+
 ## v0.9.1 — Predictive, OSINT-driven, defender-first
 
 Released as v0.9.1; v0.9.0 on origin pre-existed from an earlier release.

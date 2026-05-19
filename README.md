@@ -20,7 +20,8 @@ for SOC validation under an evidence-gated lifecycle.
 
 See `docs/predictive_engine.md`, `docs/osint_layer.md`,
 `docs/local_network_sensor.md`, and `docs/cli_operator_guide.md` for the main
-workflows; `docs/security_review.md` for the engine's own hardening; and
+workflows; `docs/advanced_tool_roadmap.md` for the advanced-tool boundary;
+`docs/security_review.md` for the engine's own hardening; and
 `CHANGELOG.md` for release notes.
 
 ## Safety Boundary
