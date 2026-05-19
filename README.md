@@ -1,5 +1,11 @@
 # GreyNOC Detector Engine
 
+[![CI](https://github.com/GreyNOC/Detector-Engine/actions/workflows/ci.yml/badge.svg)](https://github.com/GreyNOC/Detector-Engine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GreyNOC/Detector-Engine?display_name=tag)](https://github.com/GreyNOC/Detector-Engine/releases/tag/v1.0.0)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/security-policy-blue)](SECURITY.md)
+
 > **Public demo / research engine:** This repository is intentionally public to share GreyNOC's defensive security research, detection-engine concepts, and community-facing project direction. It is not a production SOC deployment, does not include customer environments, and should not contain secrets, private telemetry, internal infrastructure details, or proprietary client-specific logic.
 
 GreyNOC Detector Engine is a defensive, OSINT-driven, *predictive* threat
@@ -17,6 +23,46 @@ horizon, p50/p90 days, confidence, and a list of named drivers. Threats are
 catalogued in a local SQLite-backed library and draft detections (Sigma,
 Splunk SPL, Elastic KQL, Microsoft Defender KQL, YARA, Suricata) are generated
 for SOC validation under an evidence-gated lifecycle.
+
+## v1.0.0 Release
+
+Version 1.0.0 is the first advanced, operator-grade release of the Detector
+Engine. It is ready for public demo use, local lab evaluation, and controlled
+SOC pilot review.
+
+```bash
+python -m pip install -e '.[dev]'
+gn workflow demo --pretty
+```
+
+The golden-path demo is offline by default. It initializes local paths, ingests
+bundled fixture-backed sources, correlates signals, runs the predictive layer,
+drafts detections, and prints a compact JSON report.
+
+For the complete release copy, see
+[`docs/release_notes_v1.0.0.md`](docs/release_notes_v1.0.0.md). For the
+historical changelog, see [`CHANGELOG.md`](CHANGELOG.md).
+
+## Who This Is For
+
+- SOC analysts who need a repeatable defensive triage queue.
+- Detection engineers who want draft Sigma, SPL, KQL, YARA metadata, and
+  Suricata metadata for review.
+- Threat-intelligence analysts who want OSINT enrichment, weak-signal
+  correlation, and explainable forecast drivers.
+- Defensive security labs evaluating local-first detection-engine workflows.
+
+## Current Limits
+
+- This is not a SaaS or multi-tenant SOC platform.
+- SQLite is the default local backend; Postgres is planned as future work.
+- API-key authentication is a starter protection layer; production-style use
+  should sit behind a reverse proxy or API gateway with TLS, logging, network
+  policy, and user/RBAC controls.
+- Generated detections remain drafts until validated with structured human
+  evidence.
+- Live fetching is disabled by default and should only be enabled in controlled
+  environments with appropriate source allowlists.
 
 See `docs/predictive_engine.md`, `docs/osint_layer.md`,
 `docs/local_network_sensor.md`, and `docs/cli_operator_guide.md` for the main
