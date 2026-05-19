@@ -23,7 +23,10 @@ their own trust boundary documented in `osint_layer.md`).
 *Files:* `utils/http.py`.
 *Risk:* SSRF chains and memory exhaustion from a hostile feed.
 *Fix:* Added `MAX_REDIRECTS = 5`, `DEFAULT_MAX_BYTES = 5_000_000`, streamed reads
-that abort if the cap is exceeded. The same 5,000,000-byte default is used in
+that abort if the cap is exceeded. Redirects are followed manually so every
+`Location` hop is revalidated against scheme and host policy; cross-host
+redirects are refused unless the destination is explicitly present in
+`GREYNOC_ALLOWED_FETCH_HOSTS`. The same 5,000,000-byte default is used in
 settings, `.env.example`, README, and this security review.
 
 **H2. Git clone could be redirected by the remote server.**
@@ -138,6 +141,13 @@ contention risk.
 *Fix:* FastAPI initializes SQLite once during app lifespan and stores the
 `SQLiteStorage` instance on `app.state`. The dependency reuses that app-scoped
 storage.
+
+**M9. Fixture-backed ingest reads were not size bounded.**
+*Files:* `ingest/base.py`.
+*Risk:* A local or API-supplied fixture under an allowed root could consume
+excessive memory before parsing, even though live HTTP responses were capped.
+*Fix:* Fixture JSON/text reads now check file size against
+`GREYNOC_MAX_RESPONSE_BYTES` before reading.
 
 ### LOW (accepted as documented design)
 

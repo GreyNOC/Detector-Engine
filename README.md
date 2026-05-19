@@ -1,7 +1,7 @@
 # GreyNOC Detector Engine
 
 [![CI](https://github.com/GreyNOC/Detector-Engine/actions/workflows/ci.yml/badge.svg)](https://github.com/GreyNOC/Detector-Engine/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/GreyNOC/Detector-Engine?display_name=tag)](https://github.com/GreyNOC/Detector-Engine/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/github/v/release/GreyNOC/Detector-Engine?display_name=tag)](https://github.com/GreyNOC/Detector-Engine/releases/tag/v1.0.1)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/security-policy-blue)](SECURITY.md)
@@ -24,23 +24,24 @@ catalogued in a local SQLite-backed library and draft detections (Sigma,
 Splunk SPL, Elastic KQL, Microsoft Defender KQL, YARA, Suricata) are generated
 for SOC validation under an evidence-gated lifecycle.
 
-## v1.0.0 Release
+## v1.0.1 Release
 
-Version 1.0.0 is the first advanced, operator-grade release of the Detector
-Engine. It is ready for public demo use, local lab evaluation, and controlled
-SOC pilot review.
+Version 1.0.1 is a security hardening patch for the first advanced,
+operator-grade release of the Detector Engine. It keeps the v1 workflow intact
+while tightening HTTP redirect policy, fixture-ingest bounds, dependency
+minimums, and type-check packaging hygiene.
 
 ```bash
 python -m pip install -e '.[dev]'
 gn workflow demo --pretty
 ```
 
-The golden-path demo is offline by default. It initializes local paths, ingests
-bundled fixture-backed sources, correlates signals, runs the predictive layer,
-drafts detections, and prints a compact JSON report.
+The golden-path demo is still offline by default. It initializes local paths,
+ingests bundled fixture-backed sources, correlates signals, runs the predictive
+layer, drafts detections, and prints a compact JSON report.
 
 For the complete release copy, see
-[`docs/release_notes_v1.0.0.md`](docs/release_notes_v1.0.0.md). For the
+[`docs/release_notes_v1.0.1.md`](docs/release_notes_v1.0.1.md). For the
 historical changelog, see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Who This Is For

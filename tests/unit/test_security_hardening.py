@@ -10,8 +10,26 @@ from greynoc_detector_engine.detection.safety import (
     sanitize_rule_term,
     sanitize_rule_terms,
 )
+from greynoc_detector_engine.ingest.base import BaseIngestor, IngestSourceUnavailable
 from greynoc_detector_engine.ingest.git_clone import GitCloner, GitCloneRefused
+from greynoc_detector_engine.models.source import SourceCategory, SourceConfig, SourceType
 from greynoc_detector_engine.spacestation.honeypot import HoneypotConfig
+from greynoc_detector_engine.utils.http import DefensiveHttpClient, HttpFetchError
+
+
+class _DummyIngestor(BaseIngestor[object]):
+    def ingest(self) -> list[object]:
+        return []
+
+
+def _source_config() -> SourceConfig:
+    return SourceConfig(
+        id="test-source",
+        name="Test Source",
+        category=SourceCategory.CVE,
+        type=SourceType.CVE_JSON,
+        url="https://good.example/feed.json",
+    )
 
 
 def test_sanitize_rule_term_strips_quotes_and_newlines() -> None:
@@ -78,3 +96,48 @@ def test_validate_fixture_path_returns_none_when_omitted(tmp_path: Path) -> None
     settings = Settings(database_path=tmp_path / "t.sqlite", data_dir=tmp_path / "data")
     assert validate_fixture_path(None, settings) is None
     assert validate_fixture_path("", settings) is None
+
+
+def test_http_redirects_must_stay_allowlisted() -> None:
+    client = DefensiveHttpClient(
+        timeout_seconds=1.0,
+        user_agent="test",
+        allowed_hosts=["good.example"],
+    )
+
+    assert (
+        client._resolve_redirect_url(
+            "https://good.example/feed",
+            "/next",
+            original_url="https://good.example/feed",
+        )
+        == "https://good.example/next"
+    )
+
+    with pytest.raises(HttpFetchError, match="allowed_fetch_hosts"):
+        client._resolve_redirect_url(
+            "https://good.example/feed",
+            "https://evil.example/metadata",
+            original_url="https://good.example/feed",
+        )
+
+
+def test_http_redirects_reject_cross_host_without_allowlist() -> None:
+    client = DefensiveHttpClient(timeout_seconds=1.0, user_agent="test")
+
+    with pytest.raises(HttpFetchError, match="cross-host redirect refused"):
+        client._resolve_redirect_url(
+            "https://good.example/feed",
+            "https://evil.example/metadata",
+            original_url="https://good.example/feed",
+        )
+
+
+def test_fixture_reads_are_size_bounded(tmp_path: Path) -> None:
+    fixture = tmp_path / "too-large.json"
+    fixture.write_text("x" * 1025, encoding="utf-8")
+    settings = Settings(database_path=tmp_path / "t.sqlite", max_response_bytes=1024)
+    ingestor = _DummyIngestor(_source_config(), settings, fixture_path=fixture)
+
+    with pytest.raises(IngestSourceUnavailable, match="GREYNOC_MAX_RESPONSE_BYTES"):
+        ingestor.load_text_payload()

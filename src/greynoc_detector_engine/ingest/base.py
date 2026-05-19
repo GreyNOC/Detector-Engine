@@ -41,6 +41,7 @@ class BaseIngestor(ABC, Generic[T]):
 
     def load_json_payload(self) -> Any:
         if self.fixture_path:
+            self._validate_fixture_size()
             with self.fixture_path.open("r", encoding="utf-8") as handle:
                 return json.load(handle)
 
@@ -54,6 +55,7 @@ class BaseIngestor(ABC, Generic[T]):
 
     def load_text_payload(self) -> str:
         if self.fixture_path:
+            self._validate_fixture_size()
             return self.fixture_path.read_text(encoding="utf-8")
 
         if not self.settings.fetch_live:
@@ -63,3 +65,18 @@ class BaseIngestor(ABC, Generic[T]):
         if not self.source_config.url:
             raise IngestSourceUnavailable(f"{self.source_config.source_id} has no configured URL")
         return self.http.get_text(self.source_config.url)
+
+    def _validate_fixture_size(self) -> None:
+        if self.fixture_path is None:
+            return
+        try:
+            size = self.fixture_path.stat().st_size
+        except OSError as exc:
+            raise IngestSourceUnavailable(
+                f"fixture is not readable for {self.source_config.source_id}: {self.fixture_path}"
+            ) from exc
+        if size > self.settings.max_response_bytes:
+            raise IngestSourceUnavailable(
+                f"fixture for {self.source_config.source_id} is {size} bytes; "
+                f"cap is GREYNOC_MAX_RESPONSE_BYTES={self.settings.max_response_bytes}"
+            )

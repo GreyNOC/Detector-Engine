@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.1 - Security hardening patch
+
+This patch release keeps the v1.0 operator workflow intact and tightens the
+engine's own attack surface.
+
+### Security
+
+- HTTP ingest redirects are now followed manually so every `Location` hop is
+  revalidated against scheme and host policy. Cross-host redirects are refused
+  unless the destination is explicitly allowlisted in
+  `GREYNOC_ALLOWED_FETCH_HOSTS`.
+- Fixture-backed JSON/text ingest now checks file size against
+  `GREYNOC_MAX_RESPONSE_BYTES` before reading.
+- Dependency floors were raised for the FastAPI/Starlette/Uvicorn runtime
+  surface and affected transitive packages surfaced by audit.
+
+### Quality
+
+- Added regression tests for redirect allowlist behavior and fixture size
+  bounds.
+- Added the PEP 561 `py.typed` marker so source-tree mypy checks can validate
+  the package cleanly.
+- Verification at release: 167 tests pass, ruff passes, and source-tree mypy
+  passes.
+
 ## v1.0.0 — Advanced tool, operator-grade workflow
 
 The 1.0 release moves the engine from advanced prototype to advanced

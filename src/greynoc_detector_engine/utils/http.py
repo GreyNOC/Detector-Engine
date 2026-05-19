@@ -24,7 +24,7 @@ import json
 import time
 from collections.abc import Iterable
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -86,23 +86,31 @@ class DefensiveHttpClient:
         }
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
+            current_url = url
             try:
-                with (
-                    httpx.Client(
-                        timeout=self.timeout_seconds,
-                        follow_redirects=True,
-                        max_redirects=self.max_redirects,
-                    ) as client,
-                    client.stream("GET", url, headers=headers) as response,
-                ):
-                    response.raise_for_status()
-                    self._validate_content_length(url, response)
-                    body = self._read_bounded(response, url)
-                    return body, response.headers.get("content-type", "").lower()
-            except httpx.TooManyRedirects as exc:
-                raise HttpFetchError(
-                    f"too many redirects fetching {url} (max {self.max_redirects})"
-                ) from exc
+                with httpx.Client(
+                    timeout=self.timeout_seconds,
+                    follow_redirects=False,
+                ) as client:
+                    for redirect_count in range(self.max_redirects + 1):
+                        with client.stream("GET", current_url, headers=headers) as response:
+                            if response.is_redirect:
+                                if redirect_count >= self.max_redirects:
+                                    raise HttpFetchError(
+                                        f"too many redirects fetching {url} "
+                                        f"(max {self.max_redirects})"
+                                    )
+                                current_url = self._resolve_redirect_url(
+                                    current_url,
+                                    response.headers.get("location"),
+                                    original_url=url,
+                                )
+                                continue
+
+                            response.raise_for_status()
+                            self._validate_content_length(current_url, response)
+                            body = self._read_bounded(response, current_url)
+                            return body, response.headers.get("content-type", "").lower()
             except (ResponseTooLargeError, HttpFetchError):
                 raise
             except httpx.HTTPError as exc:
@@ -111,6 +119,28 @@ class DefensiveHttpClient:
                     break
                 time.sleep(min(2.0, 0.25 * (2**attempt)))
         raise HttpFetchError(f"failed to fetch {url}: {last_error}")
+
+    def _resolve_redirect_url(
+        self,
+        current_url: str,
+        location: str | None,
+        *,
+        original_url: str,
+    ) -> str:
+        if not location:
+            raise HttpFetchError(f"redirect from {current_url} did not include a Location header")
+
+        next_url = urljoin(current_url, location)
+        self._validate_url(next_url)
+
+        if not self.allowed_hosts:
+            original_host = urlparse(original_url).hostname or ""
+            next_host = urlparse(next_url).hostname or ""
+            if next_host.lower() != original_host.lower():
+                raise HttpFetchError(
+                    f"cross-host redirect refused: {original_host} -> {next_host}"
+                )
+        return next_url
 
     def _read_bounded(self, response: httpx.Response, url: str) -> bytes:
         buf = bytearray()
