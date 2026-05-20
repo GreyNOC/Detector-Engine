@@ -137,9 +137,7 @@ class DefensiveHttpClient:
             original_host = urlparse(original_url).hostname or ""
             next_host = urlparse(next_url).hostname or ""
             if next_host.lower() != original_host.lower():
-                raise HttpFetchError(
-                    f"cross-host redirect refused: {original_host} -> {next_host}"
-                )
+                raise HttpFetchError(f"cross-host redirect refused: {original_host} -> {next_host}")
         return next_url
 
     def _read_bounded(self, response: httpx.Response, url: str) -> bytes:
