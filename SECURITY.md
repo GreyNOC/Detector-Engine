@@ -2,15 +2,21 @@
 
 GreyNOC Detector Engine is a defensive, public demo and research project. We take vulnerability reports seriously and appreciate responsible disclosure from researchers, users, and defenders.
 
+## Supported Scope
+
+Security review covers the current default branch of this repository unless GreyNOC documents additional supported release branches.
+
 ## Reporting a Vulnerability
 
-Please do not open a public GitHub issue for suspected security vulnerabilities.
+Please do not open a public GitHub issue for suspected security vulnerabilities, exploit details, credentials, private data, or working attack instructions.
 
-To report a vulnerability, email:
+Use GitHub private vulnerability reporting when it is available for this repository.
+
+To report a vulnerability by email, use:
 
 **security@greynoc.com**
 
-If that mailbox is not available, contact the repository owner through the GreyNOC GitHub organization profile and include "Security Report: Detector Engine" in the subject or first line of the message.
+If that mailbox is not available, contact the repository owner through the GreyNOC GitHub organization profile and include "Security Report: Detector Engine" in the subject or first line of the message. If no private path is available, open a minimal public issue that says you have a security report for @GreyNOC and omit sensitive details until a private channel is arranged.
 
 ## What to Include
 
