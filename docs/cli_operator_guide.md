@@ -58,9 +58,16 @@ gn - ingest all --include-git
 gn - threats list --summary --limit 25 --pretty
 gn - threats list --severity high --summary
 gn - threats list --status new --summary
+gn - threats list --query edgegateway --min-probability 0.5 --summary --pretty
+gn - threats list --cve CVE-2026-12345 --product vpn --actor "Volt Typhoon" --summary
 gn - threats top --limit 10 --min-probability 0.5 --pretty
 gn - threats show thr-cve-cve-2026-12345 --pretty
 ```
+
+`threats list` supports operator triage filters for free-text search, exact
+CVE, product, actor, sector, campaign, forecast horizon, AI attack type, and
+probability windows. `--sort` accepts `priority`, `probability`, `severity`,
+`confidence`, `last_seen`, `first_seen`, or `title`.
 
 `threats top` ranks threats by attack probability, severity, and predictive
 score. It is meant to give an analyst a quick starting queue without adding any

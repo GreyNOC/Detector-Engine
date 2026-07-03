@@ -3,10 +3,20 @@ from __future__ import annotations
 import json
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import typer
 
+if TYPE_CHECKING:
+    from greynoc_detector_engine.crypto import HybridSigner
+    from greynoc_detector_engine.eval.corpus import ForecastCorpusStats, ForecastExample
+
+from greynoc_detector_engine.catalog.threat_query import (
+    ThreatQueryFilters,
+    ThreatSort,
+    filter_threats,
+    summarize_threat,
+)
 from greynoc_detector_engine.config.settings import get_settings
 from greynoc_detector_engine.ingest.base import IngestSourceUnavailable
 from greynoc_detector_engine.models.detection import (
@@ -14,7 +24,13 @@ from greynoc_detector_engine.models.detection import (
     DetectionStatus,
     GeneratedDetection,
 )
-from greynoc_detector_engine.models.threat import ThreatRecord, ThreatSeverity, ThreatStatus
+from greynoc_detector_engine.models.prediction import ForecastHorizon
+from greynoc_detector_engine.models.threat import (
+    AIAttackType,
+    ThreatRecord,
+    ThreatSeverity,
+    ThreatStatus,
+)
 from greynoc_detector_engine.utils.logging import configure_logging
 from greynoc_detector_engine.workers.jobs import (
     build_storage,
@@ -53,6 +69,13 @@ export_app = typer.Typer(help="Export the threat library to STIX 2.1 or ATT&CK N
 doctor_app = typer.Typer(help="Engine self-diagnostic: safety defaults + source health.")
 workflow_app = typer.Typer(help="Repeatable operator workflows (golden path demo, etc.).")
 jobs_app = typer.Typer(help="Inspect orchestrated worker job history.")
+eval_app = typer.Typer(help="Offline forecast-quality evaluation (metrics, calibration, weights).")
+quantum_app = typer.Typer(help="Post-quantum / harvest-now-decrypt-later threat assessment.")
+crypto_app = typer.Typer(
+    help="Post-quantum crypto: keys, signing, KEM encryption, CBOM, transparency log."
+)
+crypto_log_app = typer.Typer(help="Tamper-evident, PQ-signed Merkle transparency log of artifacts.")
+crypto_app.add_typer(crypto_log_app, name="log")
 
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(threats_app, name="threats")
@@ -65,6 +88,9 @@ app.add_typer(export_app, name="export")
 app.add_typer(doctor_app, name="doctor")
 app.add_typer(workflow_app, name="workflow")
 app.add_typer(jobs_app, name="jobs")
+app.add_typer(eval_app, name="eval")
+app.add_typer(quantum_app, name="quantum")
+app.add_typer(crypto_app, name="crypto")
 
 
 @app.callback()
@@ -383,20 +409,74 @@ def predict_imminent(
 
 @threats_app.command("list")
 def list_threats(
+    query: str | None = typer.Option(
+        None,
+        "--query",
+        "-q",
+        help=(
+            "Case-insensitive search across title, summary, CVEs, products, actors, "
+            "sectors, and evidence."
+        ),
+    ),
     severity: str | None = typer.Option(None, "--severity", help="Filter by severity."),
     status: str | None = typer.Option(None, "--status", help="Filter by threat status."),
+    cve: str | None = typer.Option(None, "--cve", help="Filter by exact related CVE ID."),
+    product: str | None = typer.Option(
+        None,
+        "--product",
+        help="Filter by affected product substring.",
+    ),
+    actor: str | None = typer.Option(None, "--actor", help="Filter by suspected actor substring."),
+    sector: str | None = typer.Option(None, "--sector", help="Filter by sector substring."),
+    campaign: str | None = typer.Option(None, "--campaign", help="Filter by exact campaign ID."),
+    horizon: str | None = typer.Option(None, "--horizon", help="Filter by forecast horizon."),
+    ai_attack_type: str | None = typer.Option(
+        None,
+        "--ai-attack-type",
+        help="Filter by AI attack taxonomy value.",
+    ),
+    min_probability: float | None = typer.Option(
+        None,
+        "--min-probability",
+        min=0.0,
+        max=1.0,
+        help="Require a forecast probability at or above this value.",
+    ),
+    max_probability: float | None = typer.Option(
+        None,
+        "--max-probability",
+        min=0.0,
+        max=1.0,
+        help="Require a forecast probability at or below this value.",
+    ),
+    sort: str = typer.Option(
+        ThreatSort.PRIORITY.value,
+        "--sort",
+        help=(
+            "Sort by priority, probability, severity, confidence, last_seen, first_seen, or title."
+        ),
+    ),
     limit: int = typer.Option(DEFAULT_CLI_LIMIT, "--limit", min=1, max=MAX_CLI_LIMIT),
     summary: bool = typer.Option(False, "--summary", help="Return compact threat summaries."),
     pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
 ) -> None:
     storage = build_storage(get_settings())
-    threats = storage.list_threats()
-    if severity is not None:
-        parsed_severity = _parse_enum(ThreatSeverity, severity, "severity")
-        threats = [threat for threat in threats if threat.severity == parsed_severity]
-    if status is not None:
-        parsed_status = _parse_enum(ThreatStatus, status, "status")
-        threats = [threat for threat in threats if threat.status == parsed_status]
+    filters = _build_threat_filters(
+        query=query,
+        severity=severity,
+        status=status,
+        cve=cve,
+        product=product,
+        actor=actor,
+        sector=sector,
+        campaign=campaign,
+        horizon=horizon,
+        ai_attack_type=ai_attack_type,
+        min_probability=min_probability,
+        max_probability=max_probability,
+    )
+    parsed_sort = _parse_enum(ThreatSort, sort, "sort")
+    threats = filter_threats(storage.list_threats(), filters, sort=parsed_sort)
     threats = threats[:limit]
     payload: Any
     if summary:
@@ -890,9 +970,22 @@ def predict_record_outcome(
     typer.echo('{"status":"recorded"}')
 
 
+def _signer_from_settings() -> HybridSigner | None:
+    """Build a signer from the configured shared secret, or None if unset."""
+    from greynoc_detector_engine.crypto import HybridSigner, keyset_from_hmac_secret
+
+    secret = get_settings().signing_hmac_key
+    if secret is None:
+        return None
+    return HybridSigner(keyset_from_hmac_secret(secret.get_secret_value()))
+
+
 @export_app.command("stix")
 def export_stix(
     out: Path = typer.Option(..., "--out", help="Path to write the STIX 2.1 bundle JSON."),
+    sign: bool = typer.Option(
+        False, "--sign", help="Also write a hybrid signature envelope (<out>.sig.json)."
+    ),
 ) -> None:
     """Export the threat library + campaigns as a STIX 2.1 bundle."""
     from greynoc_detector_engine.exporters import StixExporter
@@ -904,7 +997,48 @@ def export_stix(
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(bundle.model_dump_json(indent=2), encoding="utf-8")
-    typer.echo(json.dumps({"path": str(out), "objects": len(bundle.objects)}))
+    result: dict[str, object] = {"path": str(out), "objects": len(bundle.objects)}
+    if sign:
+        signer = _signer_from_settings()
+        if signer is None:
+            typer.echo(
+                "Signing requested but GREYNOC_SIGNING_HMAC_KEY is not configured.", err=True
+            )
+            raise typer.Exit(1)
+        envelope = signer.sign(out.read_bytes())
+        sig_path = out.with_name(out.name + ".sig.json")
+        sig_path.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
+        result["signature"] = str(sig_path)
+        result["algorithms"] = envelope.algorithms
+    typer.echo(json.dumps(result))
+
+
+@app.command("verify-signature")
+def verify_signature_command(
+    artifact: Path = typer.Argument(..., exists=True, readable=True, help="Signed artifact file."),
+    signature: Path = typer.Argument(
+        ..., exists=True, readable=True, help="The .sig.json envelope."
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Verify a hybrid signature envelope against an artifact's bytes."""
+    from greynoc_detector_engine.crypto import HybridSigner, SignatureEnvelope, SigningKeyset
+
+    signer = _signer_from_settings() or HybridSigner(SigningKeyset())
+    envelope = SignatureEnvelope.model_validate_json(signature.read_text(encoding="utf-8"))
+    result = signer.verify(artifact.read_bytes(), envelope)
+    _emit_json(
+        {
+            "ok": result.ok,
+            "verified": result.verified,
+            "unverifiable": result.unverifiable,
+            "strongest_algorithm": result.strongest_algorithm,
+            "quantum_resistant": result.quantum_resistant,
+            "notes": result.notes,
+        },
+        pretty=pretty,
+    )
+    raise typer.Exit(0 if result.ok else 2)
 
 
 @export_app.command("attack-navigator")
@@ -948,6 +1082,92 @@ def doctor_sources() -> None:
     report = run_source_health(storage)
     typer.echo(render_findings(report.findings))
     raise typer.Exit(report.exit_code)
+
+
+@doctor_app.command("crypto")
+def doctor_crypto() -> None:
+    """Report the engine's post-quantum cryptographic posture."""
+    from greynoc_detector_engine.workers.health import render_findings, run_crypto_posture_check
+
+    report = run_crypto_posture_check()
+    typer.echo(render_findings(report.findings))
+    raise typer.Exit(report.exit_code)
+
+
+def _load_eval_corpus(
+    corpus: Path | None, lenient: bool
+) -> tuple[list[ForecastExample], ForecastCorpusStats]:
+    from greynoc_detector_engine.eval.corpus import DEFAULT_CORPUS, load_forecast_corpus
+
+    path = corpus or DEFAULT_CORPUS
+    if not path.exists():
+        typer.echo(f"Corpus not found: {path}", err=True)
+        raise typer.Exit(1)
+    return load_forecast_corpus(path, lenient=lenient)
+
+
+@eval_app.command("report")
+def eval_report(
+    corpus: Path | None = typer.Argument(None, help="Corpus JSONL (defaults to bundled seed set)."),
+    threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0),
+    lenient: bool = typer.Option(False, "--lenient", help="Skip malformed rows."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Score forecast probabilities against realized outcomes (ROC-AUC, TPR@FPR, F1, ECE)."""
+    from greynoc_detector_engine.eval.runner import evaluate_forecast_corpus
+
+    examples, stats = _load_eval_corpus(corpus, lenient)
+    report = evaluate_forecast_corpus(examples, threshold=threshold)
+    _emit_json({"corpus": stats.as_dict(), "report": report.as_dict()}, pretty=pretty)
+
+
+@eval_app.command("calibrate")
+def eval_calibrate(
+    corpus: Path | None = typer.Argument(None, help="Corpus JSONL (defaults to bundled seed set)."),
+    l2: float = typer.Option(1.0, "--l2", min=0.0, help="L2 regularization strength."),
+    lenient: bool = typer.Option(False, "--lenient", help="Skip malformed rows."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Fit Platt scaling so the fused score reads as a probability; report ECE/Brier."""
+    from greynoc_detector_engine.eval.runner import fit_forecast_calibration
+
+    examples, stats = _load_eval_corpus(corpus, lenient)
+    result = fit_forecast_calibration(examples, l2=l2)
+    _emit_json({"corpus": stats.as_dict(), "calibration": result.as_dict()}, pretty=pretty)
+
+
+@eval_app.command("learn-weights")
+def eval_learn_weights(
+    corpus: Path | None = typer.Argument(None, help="Corpus JSONL (defaults to bundled seed set)."),
+    l2: float = typer.Option(2.0, "--l2", min=0.0, help="L2 regularization strength."),
+    out: Path | None = typer.Option(None, "--out", help="Write learned weights JSON to a file."),
+    lenient: bool = typer.Option(False, "--lenient", help="Skip malformed rows."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Learn glass-box per-driver predictive_fusion_weights from realized outcomes."""
+    from greynoc_detector_engine.eval.runner import learn_fusion_weights
+
+    examples, _ = _load_eval_corpus(corpus, lenient)
+    learned = learn_fusion_weights(examples, l2=l2).as_dict()
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(learned, indent=2), encoding="utf-8")
+        typer.echo(json.dumps({"path": str(out), "trained_on": learned["trained_on"]}))
+        return
+    _emit_json(learned, pretty=pretty)
+
+
+@quantum_app.command("scan")
+def quantum_scan(
+    text: str = typer.Argument(..., help="Threat text / advisory to assess for quantum exposure."),
+    product: list[str] | None = typer.Option(None, "--product", help="Affected product (repeat)."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Assess text for quantum-vulnerable crypto and harvest-now-decrypt-later risk."""
+    from greynoc_detector_engine.analysis.quantum_risk import QuantumRiskClassifier
+
+    assessment = QuantumRiskClassifier().assess(text, list(product or []))
+    _emit_json(assessment.model_dump(mode="json"), pretty=pretty)
 
 
 @app.command("serve")
@@ -998,22 +1218,47 @@ def _parse_enum(enum_type: type[EnumT], raw: str, name: str) -> EnumT:
         raise typer.BadParameter(f"Invalid {name}: {raw}. Expected one of: {allowed}") from exc
 
 
+def _build_threat_filters(
+    *,
+    query: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    cve: str | None = None,
+    product: str | None = None,
+    actor: str | None = None,
+    sector: str | None = None,
+    campaign: str | None = None,
+    horizon: str | None = None,
+    ai_attack_type: str | None = None,
+    min_probability: float | None = None,
+    max_probability: float | None = None,
+) -> ThreatQueryFilters:
+    if (
+        min_probability is not None
+        and max_probability is not None
+        and min_probability > max_probability
+    ):
+        raise typer.BadParameter("min_probability cannot be greater than max_probability")
+    return ThreatQueryFilters(
+        query=query,
+        severity=_parse_enum(ThreatSeverity, severity, "severity") if severity else None,
+        status=_parse_enum(ThreatStatus, status, "status") if status else None,
+        cve=cve.upper() if cve else None,
+        product=product,
+        actor=actor,
+        sector=sector,
+        campaign=campaign,
+        horizon=_parse_enum(ForecastHorizon, horizon, "horizon") if horizon else None,
+        ai_attack_type=(
+            _parse_enum(AIAttackType, ai_attack_type, "ai_attack_type") if ai_attack_type else None
+        ),
+        min_probability=min_probability,
+        max_probability=max_probability,
+    )
+
+
 def _threat_summary(threat: ThreatRecord) -> dict[str, Any]:
-    forecast = threat.attack_forecast
-    predictive_score = threat.predictive_score
-    return {
-        "threat_id": threat.threat_id,
-        "title": threat.title,
-        "severity": threat.severity.value,
-        "status": threat.status.value,
-        "confidence": threat.confidence,
-        "predictive_score": predictive_score.score if predictive_score is not None else None,
-        "attack_probability": forecast.attack_probability if forecast is not None else None,
-        "horizon": forecast.horizon.value if forecast is not None else None,
-        "related_cves": threat.related_cves,
-        "campaign_ids": threat.campaign_ids,
-        "recommended_soc_actions": threat.recommended_soc_actions[:5],
-    }
+    return summarize_threat(threat)
 
 
 def _detection_summary(detection: GeneratedDetection) -> dict[str, Any]:
@@ -1038,6 +1283,491 @@ def _threat_priority_sort_key(row: dict[str, Any]) -> tuple[float, float, float]
     attack_probability = float(row.get("attack_probability") or 0.0)
     predictive_score = float(row.get("predictive_score") or 0.0)
     return (attack_probability, severity_weight, predictive_score)
+
+
+def _keystore() -> Any:
+    from greynoc_detector_engine.crypto.keystore import Keystore
+
+    return Keystore(get_settings().keystore_path)
+
+
+@crypto_app.command("algorithms")
+def crypto_algorithms(
+    family: str | None = typer.Option(None, "--family", help="Filter: kem, signature, hash, ..."),
+    cnsa: bool = typer.Option(False, "--cnsa", help="Only the CNSA 2.0 suite."),
+    vulnerable: bool = typer.Option(False, "--vulnerable", help="Only quantum-vulnerable."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List the post-quantum algorithm registry (sizes, categories, standards, deadlines)."""
+    from greynoc_detector_engine.crypto import algorithms as alg
+
+    records = alg.all_algorithms()
+    if family is not None:
+        records = tuple(r for r in records if r.family.value == family.strip().lower())
+    if cnsa:
+        records = tuple(r for r in records if r.cnsa_2_0)
+    if vulnerable:
+        records = tuple(r for r in records if r.quantum_vulnerable)
+    payload = [
+        {
+            "name": r.name,
+            "family": r.family.value,
+            "standard": r.standard.value if r.standard is not None else None,
+            "quantum_threat": r.quantum_threat.value,
+            "quantum_safe": r.quantum_safe,
+            "nist_category": r.nist_category,
+            "classical_bits": r.classical_bits,
+            "cnsa_2_0": r.cnsa_2_0,
+            "deprecated_after": r.deprecated_after,
+            "disallowed_after": r.disallowed_after,
+            "replaces_with": list(r.replaces_with),
+        }
+        for r in records
+    ]
+    _emit_json(payload, pretty=pretty)
+
+
+@crypto_app.command("posture")
+def crypto_posture_command(
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Machine-readable post-quantum posture (see also: gn doctor crypto)."""
+    from greynoc_detector_engine.crypto import crypto_posture
+
+    posture = crypto_posture()
+    payload = posture.model_dump(mode="json")
+    payload["ready"] = posture.ready
+    _emit_json(payload, pretty=pretty)
+
+
+@crypto_app.command("selftest")
+def crypto_selftest_command(
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Run known-answer / round-trip self-tests for every available crypto backend."""
+    from greynoc_detector_engine.crypto.selftest import run_crypto_selftest
+
+    report = run_crypto_selftest()
+    _emit_json(report.as_dict(), pretty=pretty)
+    raise typer.Exit(0 if report.ok else 2)
+
+
+@crypto_app.command("keygen")
+def crypto_keygen(
+    key_id: str = typer.Option(..., "--key-id", help="Identifier for the new key."),
+    algo: list[str] | None = typer.Option(
+        None, "--algo", help="Backends: hmac, lms, ed25519, mldsa (repeat). Default: hmac + lms."
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Generate a managed signing key (default: HMAC + always-available post-quantum LMS)."""
+    from greynoc_detector_engine.crypto.keystore import KeystoreError
+
+    try:
+        meta = _keystore().generate_key(key_id, algorithms=list(algo) if algo else None)
+    except KeystoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    _emit_json(meta.model_dump(mode="json"), pretty=pretty)
+
+
+@crypto_app.command("keys")
+def crypto_keys(
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """List managed keys (metadata only -- never secret material)."""
+    keys = _keystore().list_keys()
+    _emit_json([m.model_dump(mode="json") for m in keys], pretty=pretty)
+
+
+@crypto_app.command("rotate")
+def crypto_rotate(
+    old: str = typer.Option(..., "--old", help="Key id to retire."),
+    new: str = typer.Option(..., "--new", help="New key id."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Rotate a signing key: generate a successor and retire the old one."""
+    from greynoc_detector_engine.crypto.keystore import KeystoreError
+
+    try:
+        meta = _keystore().rotate_key(old, new)
+    except KeystoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    _emit_json(meta.model_dump(mode="json"), pretty=pretty)
+
+
+@crypto_app.command("sign")
+def crypto_sign(
+    artifact: Path = typer.Argument(..., exists=True, readable=True, help="File to sign."),
+    key_id: str = typer.Option(..., "--key-id", help="Keystore key to sign with."),
+    out: Path | None = typer.Option(None, "--out", help="Default <artifact>.sig.json."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Sign an artifact with a managed key (advances + persists stateful LMS state)."""
+    from greynoc_detector_engine.crypto.keystore import KeystoreError
+
+    try:
+        envelope = _keystore().sign_artifact(key_id, artifact.read_bytes())
+    except KeystoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    sig_path = out or artifact.with_name(artifact.name + ".sig.json")
+    sig_path.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
+    _emit_json(
+        {
+            "artifact": str(artifact),
+            "signature": str(sig_path),
+            "algorithms": envelope.algorithms,
+            "quantum_resistant": envelope.quantum_resistant,
+        },
+        pretty=pretty,
+    )
+
+
+@crypto_app.command("kem-keygen")
+def crypto_kem_keygen(
+    out: Path = typer.Option(..., "--out", help="Path to write the KEM keypair JSON (SECRET)."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Generate a hybrid X25519 (+ ML-KEM) keypair for artifact encryption."""
+    from greynoc_detector_engine.crypto import kem
+
+    try:
+        keypair = kem.generate_kem_keypair()
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(keypair.to_dict(), indent=2), encoding="utf-8")
+    _emit_json({"keypair": str(out), "quantum_safe": kem.mlkem_available()}, pretty=pretty)
+
+
+@crypto_app.command("encrypt")
+def crypto_encrypt(
+    source: Path = typer.Argument(..., exists=True, readable=True, help="File to encrypt."),
+    key: Path = typer.Option(..., "--key", exists=True, help="Recipient KEM keypair/bundle JSON."),
+    out: Path = typer.Option(..., "--out", help="Path to write the KEM envelope JSON."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Encrypt a file to a recipient with the hybrid KEM (AES-256-GCM AEAD)."""
+    from greynoc_detector_engine.crypto import kem
+
+    keypair = kem.HybridKemKeypair.from_dict(json.loads(key.read_text(encoding="utf-8")))
+    envelope = kem.encrypt(source.read_bytes(), keypair.public_bundle())
+    out.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
+    _emit_json(
+        {"out": str(out), "algorithms": envelope.algorithms, "quantum_safe": envelope.quantum_safe},
+        pretty=pretty,
+    )
+
+
+@crypto_app.command("decrypt")
+def crypto_decrypt(
+    envelope: Path = typer.Argument(..., exists=True, readable=True, help="KEM envelope JSON."),
+    key: Path = typer.Option(..., "--key", exists=True, help="Recipient KEM keypair JSON."),
+    out: Path = typer.Option(..., "--out", help="Path to write the decrypted plaintext."),
+) -> None:
+    """Decrypt a KEM envelope with the recipient keypair."""
+    from greynoc_detector_engine.crypto import kem
+
+    keypair = kem.HybridKemKeypair.from_dict(json.loads(key.read_text(encoding="utf-8")))
+    env = kem.KemEnvelope.model_validate_json(envelope.read_text(encoding="utf-8"))
+    out.write_bytes(kem.decrypt(env, keypair))
+    typer.echo(json.dumps({"out": str(out)}))
+
+
+@crypto_app.command("cbom")
+def crypto_cbom(
+    inventory: Path = typer.Option(..., "--inventory", exists=True, help="Inventory YAML/JSON."),
+    out: Path | None = typer.Option(None, "--out", help="Path to write the CBOM JSON."),
+) -> None:
+    """Emit a CycloneDX 1.6 Cryptographic Bill of Materials from an inventory."""
+    from greynoc_detector_engine.analysis import cbom as cbom_mod
+    from greynoc_detector_engine.analysis import crypto_inventory as ci
+
+    assets, _summary, _mosca = ci.assess_inventory(ci.load_inventory(inventory))
+    bom = cbom_mod.generate_cbom(assets)
+    text = cbom_mod.to_json(bom)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        typer.echo(json.dumps({"out": str(out), "components": len(assets)}))
+        return
+    typer.echo(text)
+
+
+@crypto_log_app.command("append")
+def crypto_log_append(
+    name: str = typer.Argument(..., help="Artifact name/label."),
+    artifact: Path = typer.Argument(..., exists=True, readable=True, help="Artifact file."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Append an artifact to the tamper-evident transparency log."""
+    from greynoc_detector_engine.crypto.transparency import TransparencyLog
+
+    log = TransparencyLog(get_settings().transparency_log_path)
+    entry = log.append(name, artifact.read_bytes())
+    _emit_json(entry.model_dump(mode="json"), pretty=pretty)
+
+
+@crypto_log_app.command("root")
+def crypto_log_root(
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show the current Merkle tree size and root hash."""
+    from greynoc_detector_engine.crypto.transparency import TransparencyLog
+
+    log = TransparencyLog(get_settings().transparency_log_path)
+    _emit_json({"size": log.size(), "root": log.root()}, pretty=pretty)
+
+
+@crypto_log_app.command("checkpoint")
+def crypto_log_checkpoint(
+    key_id: str | None = typer.Option(
+        None, "--key-id", help="Keystore key that signs the checkpoint (default: configured)."
+    ),
+    out: Path | None = typer.Option(None, "--out", help="Checkpoint output path."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Produce a post-quantum-signed checkpoint (signed tree head) of the log.
+
+    The checkpoint is signed with a *persistent, pinnable* keystore key (created
+    on first use), not a throwaway key, so the log has a stable well-known public
+    key. Publish the returned ``public_key`` once; verifiers pin it with
+    ``verify-checkpoint --pubkey`` to reject forged checkpoints. The keystore
+    advances and durably persists the stateful LMS/HSS state per signature.
+    """
+    from greynoc_detector_engine.crypto.keystore import KeystoreError
+    from greynoc_detector_engine.crypto.transparency import TransparencyLog
+
+    settings = get_settings()
+    resolved_key_id = key_id or settings.transparency_log_key_id
+    keystore = _keystore()
+    try:
+        meta = keystore.get_metadata(resolved_key_id)
+    except KeystoreError:
+        # First checkpoint: mint a pure-PQ (LMS/HSS) log key so any holder of the
+        # public key can verify without a shared secret.
+        meta = keystore.generate_key(resolved_key_id, algorithms=["lms"])
+
+    log = TransparencyLog(settings.transparency_log_path)
+    try:
+        checkpoint = log.build_checkpoint(
+            lambda payload: keystore.sign_artifact(resolved_key_id, payload)
+        )
+    except KeystoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    text = checkpoint.model_dump_json(indent=2)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+    _emit_json(
+        {
+            "tree_size": checkpoint.tree_size,
+            "root": checkpoint.root_hash,
+            "key_id": resolved_key_id,
+            "public_key": meta.public_key,
+            "out": str(out) if out else None,
+        },
+        pretty=pretty,
+    )
+
+
+@crypto_log_app.command("verify-checkpoint")
+def crypto_log_verify_checkpoint(
+    checkpoint: Path = typer.Argument(..., exists=True, readable=True, help="Checkpoint JSON."),
+    pubkey: str | None = typer.Option(
+        None, "--pubkey", help="Base64 LMS public key to pin (the log's published key)."
+    ),
+    key_id: str | None = typer.Option(
+        None, "--key-id", help="Pin to a local keystore key's public key instead of --pubkey."
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Verify a checkpoint's PQ signature and that its root matches the live log.
+
+    Authenticity requires pinning the log's public key: pass ``--pubkey`` (the
+    published key) or ``--key-id`` (a local keystore key). With neither, the
+    configured log key is used if present locally; otherwise the signature is only
+    self-attesting (any key verifies), ``authenticated`` is ``false``, and a
+    warning is emitted. Exit code is non-zero unless the signature verifies *and*
+    the checkpoint root matches the live log.
+    """
+    from greynoc_detector_engine.crypto.keystore import KeystoreError
+    from greynoc_detector_engine.crypto.signing import ALG_LMS, HybridSigner, SigningKeyset
+    from greynoc_detector_engine.crypto.transparency import (
+        SignedCheckpoint,
+        TransparencyLog,
+        checkpoint_public_keys,
+    )
+
+    settings = get_settings()
+    cp = SignedCheckpoint.model_validate_json(checkpoint.read_text(encoding="utf-8"))
+
+    pin = pubkey
+    pin_source = "pubkey" if pubkey else None
+    if pin is None and key_id is not None:
+        try:
+            pin = _keystore().get_metadata(key_id).public_key
+            pin_source = f"keystore:{key_id}"
+        except KeystoreError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+    if pin is None and key_id is None and pubkey is None:
+        # Best-effort: pin the configured log key when this host holds the keystore.
+        try:
+            pin = _keystore().get_metadata(settings.transparency_log_key_id).public_key
+            if pin is not None:
+                pin_source = f"keystore:{settings.transparency_log_key_id}"
+        except KeystoreError:
+            pin = None
+
+    expected = {ALG_LMS: pin} if pin else None
+    signature_ok = TransparencyLog.verify_checkpoint(
+        cp, HybridSigner(SigningKeyset()), expected_public_keys=expected
+    )
+    log = TransparencyLog(settings.transparency_log_path)
+    root_matches = cp.root_hash == log.root() and cp.tree_size == log.size()
+    notes: list[str] = []
+    if pin is None:
+        notes.append(
+            "no public key pinned (--pubkey/--key-id); signature is self-attesting, "
+            "not authenticated"
+        )
+    _emit_json(
+        {
+            "signature_ok": signature_ok,
+            "authenticated": bool(pin) and signature_ok,
+            "root_matches_live_log": root_matches,
+            "pin_source": pin_source,
+            "pinned_key": pin,
+            "signing_key": checkpoint_public_keys(cp).get(ALG_LMS),
+            "checkpoint_root": cp.root_hash,
+            "live_root": log.root(),
+            "notes": notes,
+        },
+        pretty=pretty,
+    )
+    raise typer.Exit(0 if (signature_ok and root_matches) else 2)
+
+
+@quantum_app.command("inventory")
+def quantum_inventory(
+    path: Path = typer.Argument(..., exists=True, readable=True, help="Inventory YAML/JSON."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Assess a crypto inventory's quantum posture (per-asset Mosca + summary)."""
+    from greynoc_detector_engine.analysis import crypto_inventory as ci
+
+    settings = get_settings()
+    entries = ci.load_inventory(path)
+    assets, summary, mosca = ci.assess_inventory(
+        entries,
+        crqc_years=settings.crqc_estimate_years,
+        default_shelf_life_years=settings.default_data_shelf_life_years,
+        default_migration_years=settings.default_migration_years,
+    )
+    _emit_json(
+        {
+            "summary": summary.model_dump(mode="json"),
+            "assets": [a.model_dump(mode="json") for a in assets],
+            "mosca": {k: v.model_dump(mode="json") for k, v in mosca.items()},
+        },
+        pretty=pretty,
+    )
+
+
+@quantum_app.command("plan")
+def quantum_plan(
+    path: Path = typer.Argument(..., exists=True, readable=True, help="Inventory YAML/JSON."),
+    year: int = typer.Option(2026, "--year", help="Current year for deadline urgency."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Produce a prioritized CNSA-2.0 / NIST-IR-8547 migration plan for an inventory."""
+    from greynoc_detector_engine.analysis import crypto_inventory as ci
+    from greynoc_detector_engine.analysis import pqc_migration as pm
+
+    settings = get_settings()
+    assets, _summary, _mosca = ci.assess_inventory(
+        ci.load_inventory(path),
+        crqc_years=settings.crqc_estimate_years,
+        default_shelf_life_years=settings.default_data_shelf_life_years,
+        default_migration_years=settings.default_migration_years,
+    )
+    plan = pm.plan_migration(
+        assets,
+        crqc_years=settings.crqc_estimate_years,
+        default_shelf_life_years=settings.default_data_shelf_life_years,
+        default_migration_years=settings.default_migration_years,
+        current_year=year,
+    )
+    _emit_json(plan.model_dump(mode="json"), pretty=pretty)
+
+
+@quantum_app.command("mosca")
+def quantum_mosca(
+    shelf_life: float = typer.Option(..., "--shelf-life", help="X: data shelf-life (years)."),
+    migration: float = typer.Option(..., "--migration", help="Y: migration time (years)."),
+    crqc: float = typer.Option(..., "--crqc", help="Z: years until a CRQC exists."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Evaluate Mosca's inequality (X + Y >= Z => already at risk)."""
+    from greynoc_detector_engine.analysis.mosca import assess_mosca
+
+    result = assess_mosca(
+        data_shelf_life_years=shelf_life, migration_years=migration, crqc_years=crqc
+    )
+    _emit_json(result.model_dump(mode="json"), pretty=pretty)
+
+
+@quantum_app.command("cert")
+def quantum_cert(
+    path: Path = typer.Argument(..., exists=True, readable=True, help="X.509 cert (PEM or DER)."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Classify an X.509 certificate's quantum exposure (offline parse)."""
+    from greynoc_detector_engine.analysis.tls_posture import analyze_certificate
+
+    asset = analyze_certificate(path.read_bytes())
+    _emit_json(asset.model_dump(mode="json"), pretty=pretty)
+
+
+@quantum_app.command("eval")
+def quantum_eval(
+    corpus: Path | None = typer.Argument(None, help="Quantum corpus JSONL (defaults to bundled)."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Score the quantum-risk classifier against a labeled advisory corpus."""
+    from greynoc_detector_engine.eval.quantum import (
+        DEFAULT_CORPUS,
+        evaluate_quantum_corpus,
+        load_quantum_corpus,
+    )
+
+    examples, stats = load_quantum_corpus(corpus or DEFAULT_CORPUS)
+    report = evaluate_quantum_corpus(examples)
+    _emit_json({"corpus": stats.as_dict(), "report": report.as_dict()}, pretty=pretty)
+
+
+@quantum_app.command("timeline")
+def quantum_timeline(
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Show the CNSA 2.0 + NIST IR 8547 migration timeline and CNSA suite."""
+    from greynoc_detector_engine.crypto import algorithms as alg
+
+    _emit_json(
+        {
+            "nsm10_endpoint_year": alg.NSM10_ENDPOINT_YEAR,
+            "cnsa_2_0_exclusive_year": alg.CNSA_2_0_EXCLUSIVE_YEAR,
+            "cnsa_2_0_acquisition_gate_year": alg.CNSA_2_0_ACQUISITION_GATE_YEAR,
+            "cnsa_2_0_timeline": alg.CNSA_2_0_TIMELINE,
+            "cnsa_2_0_suite": [r.name for r in alg.cnsa_2_0_suite()],
+        },
+        pretty=pretty,
+    )
 
 
 if __name__ == "__main__":

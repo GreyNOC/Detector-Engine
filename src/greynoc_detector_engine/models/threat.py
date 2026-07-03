@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from greynoc_detector_engine.models.detection import GeneratedDetection
 from greynoc_detector_engine.models.indicator import Indicator
 from greynoc_detector_engine.models.prediction import AttackForecast, EPSSScore
+from greynoc_detector_engine.models.quantum import QuantumRiskAssessment
 from greynoc_detector_engine.models.scoring import ScoreResult
 from greynoc_detector_engine.models.source import SourceReference
 
@@ -74,6 +75,7 @@ class ThreatRecord(BaseModel):
     ai_abuse_score: ScoreResult | None = None
     predictive_score: ScoreResult | None = None
     attack_forecast: AttackForecast | None = None
+    quantum_risk: QuantumRiskAssessment | None = None
     epss_scores: list[EPSSScore] = Field(default_factory=list)
     suspected_actors: list[str] = Field(default_factory=list)
     campaign_ids: list[str] = Field(default_factory=list)

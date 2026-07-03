@@ -4,6 +4,7 @@ Trust boundary (do not relax without updating docs/security_review.md):
   * **HTTPS only.** No ``ssh://``, ``git://``, ``file://``, scp-style ``user@host:`` URLs.
   * **Allowlist match required.** A per-source ``clone_allowlist`` of
     ``host/path-prefix`` entries gates which repos may be cloned.
+    Prefixes must end on a path boundary; dot segments are rejected.
   * **No redirects.** ``http.followRedirects=false`` so a hostile server
     cannot redirect us to an unallowlisted destination.
   * **Shallow.** ``--depth=1 --single-branch --no-tags --no-recurse-submodules``.
@@ -53,7 +54,11 @@ class GitCloner:
         clone_root: Path | None = None,
         timeout_seconds: float = 60.0,
     ) -> None:
-        self.allowlist: list[str] = sorted({self._normalize(a) for a in allowlist if a})
+        self.allowlist: list[str] = sorted(
+            normalized
+            for entry in allowlist
+            if entry and (normalized := self._normalize_allowlist_entry(entry)) is not None
+        )
         self.clone_root: Path = clone_root or Path(tempfile.gettempdir()) / "greynoc-clones"
         self.timeout_seconds = timeout_seconds
 
@@ -128,13 +133,13 @@ class GitCloner:
         return target
 
     def is_allowed(self, url: str) -> bool:
-        parsed = urlparse(url)
-        if parsed.scheme != "https":
+        host_and_path = self._normalize_url(url)
+        if host_and_path is None:
             return False
-        if "@" in parsed.netloc:
-            return False
-        host_and_path = self._normalize(f"{parsed.netloc}{parsed.path}")
-        return any(host_and_path.startswith(prefix) for prefix in self.allowlist)
+        return any(
+            host_and_path == prefix or host_and_path.startswith(f"{prefix}/")
+            for prefix in self.allowlist
+        )
 
     def cleanup(self, path: Path) -> None:
         """Remove a previously-cloned directory; safe to call repeatedly.
@@ -163,14 +168,34 @@ class GitCloner:
             raise GitCloneError(f"clone target collision: {target}")
         return target
 
+    @classmethod
+    def _normalize_allowlist_entry(cls, value: str) -> str | None:
+        text = value.strip()
+        if not text:
+            return None
+        if "://" not in text:
+            text = f"https://{text}"
+        return cls._normalize_url(text)
+
     @staticmethod
-    def _normalize(value: str) -> str:
-        text = value.strip().lower().rstrip("/")
-        if text.startswith("https://"):
-            text = text[len("https://") :]
-        if text.endswith(".git"):
-            text = text[: -len(".git")]
-        return text
+    def _normalize_url(value: str) -> str | None:
+        parsed = urlparse(value.strip())
+        if parsed.scheme != "https":
+            return None
+        if parsed.username or parsed.password or "@" in parsed.netloc:
+            return None
+        if parsed.query or parsed.fragment or parsed.params:
+            return None
+        if not parsed.netloc or not parsed.path:
+            return None
+
+        path = parsed.path.strip("/")
+        if path.endswith(".git"):
+            path = path[: -len(".git")]
+        segments = path.split("/")
+        if any(segment in {"", ".", ".."} for segment in segments):
+            return None
+        return f"{parsed.netloc.lower()}/{'/'.join(segments).lower()}"
 
     @staticmethod
     def _safe_dirname(url: str) -> str:

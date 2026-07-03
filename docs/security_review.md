@@ -12,7 +12,7 @@ their own trust boundary documented in `osint_layer.md`).
 | Hostile public feed | Returns malicious JSON / RSS / git content | Pydantic `extra="forbid"`, content extension allowlist, no code execution, response size caps |
 | Local network attacker | Sends scan / connection traffic to honeypot or our services | Honeypot binds loopback by default, per-source rate limit, sanitized payload preview |
 | Anyone reachable to the API | Talks to FastAPI routes | CLI and Compose bind to `127.0.0.1` by default, production mutating routes require `GREYNOC_API_KEY`, fixture-path traversal blocked, list routes are bounded |
-| Compromised configuration | Operator pastes a hostile URL into `sources.yaml` | URL shape strict, allowlist required for clones, redirect cap, no SSH/file/git URIs |
+| Compromised configuration | Operator pastes a hostile URL into `sources.yaml` | HTTPS-only live HTTP by default, private/local IP literal block, URL shape strict, allowlist required for clones, redirect cap, no SSH/file/git URIs |
 | Malicious git repo content | Symlinks, oversize blobs, hostile filenames | Walker skips symlinks, lstat for size, per-file and total caps, forbidden-extension blocklist |
 
 ## Findings (with disposition)
@@ -80,6 +80,25 @@ other `GREYNOC_ENV` fails closed unless `GREYNOC_API_KEY` is non-empty. Mutating
 routes validate the `x-greynoc-api-key` header. Docker Compose sets
 `GREYNOC_ENV=production`, requires `GREYNOC_API_KEY`, and binds host exposure to
 `127.0.0.1:8000` by default.
+
+**H9. Live HTTP fetches allowed cleartext and private/local IP literal targets by default.**
+*Files:* `utils/http.py`, `config/settings.py`, `ingest/base.py`,
+`enrichment/epss.py`, `workers/health.py`, `README.md`, `.env.example`.
+*Risk:* A compromised source URL could make the engine fetch cleartext HTTP or
+loopback/private/link-local resources when `GREYNOC_FETCH_LIVE=true`, expanding
+SSRF and traffic-interception risk.
+*Fix:* Live fetches now require HTTPS unless `GREYNOC_ALLOW_INSECURE_HTTP=true`.
+The HTTP client blocks loopback, private, link-local, multicast, reserved, and
+unspecified IP literal hosts unless `GREYNOC_BLOCK_PRIVATE_FETCH_HOSTS=false`.
+Redirect targets are revalidated against the same rules.
+
+**H10. Git clone allowlists used a raw prefix match.**
+*Files:* `ingest/git_clone.py`.
+*Risk:* `github.com/example/sample` could also match
+`github.com/example/sample-evil` or a path containing dot segments.
+*Fix:* Clone URLs and allowlist entries are normalized through the same parser.
+Matches must be exact or continue on a path boundary, and `.` / `..` path
+segments are rejected.
 
 ### MEDIUM
 

@@ -1,0 +1,14 @@
+{"threat_id": "thr-seed-001", "attack_probability": 0.91, "verified_attack": 1, "horizon": "imminent", "model": "horizon-1.1", "drivers": {"epss_probability": 0.78, "kev_listed": 1.0, "public_exploit_availability": 0.9, "ransomware_proximity": 0.6}}
+{"threat_id": "thr-seed-002", "attack_probability": 0.84, "verified_attack": 1, "horizon": "near_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.62, "kev_listed": 1.0, "chatter_velocity": 0.55, "active_campaign": 1.0}}
+{"threat_id": "thr-seed-003", "attack_probability": 0.77, "verified_attack": 1, "horizon": "near_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.51, "public_exploit_availability": 0.7, "actor_activity": 0.6}}
+{"threat_id": "thr-seed-004", "attack_probability": 0.66, "verified_attack": 1, "horizon": "mid_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.4, "chatter_velocity": 0.5, "osint_ioc_corroboration": 0.4}}
+{"threat_id": "thr-seed-005", "attack_probability": 0.58, "verified_attack": 1, "horizon": "mid_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.33, "public_exploit_availability": 0.5, "cvss_pressure": 0.8}}
+{"threat_id": "thr-seed-006", "attack_probability": 0.49, "verified_attack": 0, "horizon": "mid_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.22, "chatter_velocity": 0.3, "cvss_pressure": 0.6}}
+{"threat_id": "thr-seed-007", "attack_probability": 0.41, "verified_attack": 0, "horizon": "long_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.18, "cvss_pressure": 0.5}}
+{"threat_id": "thr-seed-008", "attack_probability": 0.33, "verified_attack": 0, "horizon": "long_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.12, "trusted_source_corroboration": 0.3}}
+{"threat_id": "thr-seed-009", "attack_probability": 0.22, "verified_attack": 0, "horizon": "long_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.07, "cvss_pressure": 0.4}}
+{"threat_id": "thr-seed-010", "attack_probability": 0.14, "verified_attack": 0, "horizon": "unlikely", "model": "horizon-1.1", "drivers": {"epss_probability": 0.03}}
+{"threat_id": "thr-seed-011", "attack_probability": 0.09, "verified_attack": 0, "horizon": "unlikely", "model": "horizon-1.1", "drivers": {"epss_probability": 0.02, "cvss_pressure": 0.2}}
+{"threat_id": "thr-seed-012", "attack_probability": 0.71, "verified_attack": 1, "horizon": "near_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.48, "kev_listed": 1.0, "osint_ioc_corroboration": 0.5}}
+{"threat_id": "thr-seed-013", "attack_probability": 0.27, "verified_attack": 0, "horizon": "long_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.09, "chatter_velocity": 0.2}}
+{"threat_id": "thr-seed-014", "attack_probability": 0.63, "verified_attack": 1, "horizon": "mid_term", "model": "horizon-1.1", "drivers": {"epss_probability": 0.39, "public_exploit_availability": 0.6, "ransomware_proximity": 0.4}}

@@ -5,7 +5,7 @@
 - Add source-run and score-event API views.
 - Add GitHub search adapter with authenticated requests and rate-limit handling.
 - Add more fixture coverage for GitHub metadata ingestion.
-- Add search and filtering over threat-library fields.
+- Add saved search presets and triage queue views on top of threat-library filters.
 
 ## Mid Term
 
@@ -19,4 +19,3 @@
 - Add asset inventory enrichment.
 - Add analyst feedback loops.
 - Add export formats for SIEM workflows and case-management systems.
-

@@ -85,7 +85,7 @@ def test_validate_fixture_path_refuses_traversal(tmp_path: Path) -> None:
     inside = validate_fixture_path(str(settings.data_dir / "ok.json"), settings)
     assert inside is not None
 
-    # Path outside the allowed roots → 400.
+    # Path outside the allowed roots returns 400.
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException):
@@ -131,6 +131,39 @@ def test_http_redirects_reject_cross_host_without_allowlist() -> None:
             "https://evil.example/metadata",
             original_url="https://good.example/feed",
         )
+
+
+def test_http_fetch_rejects_insecure_http_by_default() -> None:
+    client = DefensiveHttpClient(timeout_seconds=1.0, user_agent="test")
+
+    with pytest.raises(HttpFetchError, match="insecure HTTP fetch refused"):
+        client._validate_url("http://good.example/feed")
+
+
+def test_http_fetch_rejects_private_and_local_hosts_by_default() -> None:
+    client = DefensiveHttpClient(timeout_seconds=1.0, user_agent="test")
+
+    for url in (
+        "https://localhost/feed",
+        "https://127.0.0.1/feed",
+        "https://127.1/feed",
+        "https://10.0.0.8/feed",
+        "https://169.254.10.20/feed",
+        "https://[::1]/feed",
+    ):
+        with pytest.raises(HttpFetchError, match="private or local fetch host refused"):
+            client._validate_url(url)
+
+
+def test_http_fetch_can_explicitly_allow_insecure_private_hosts() -> None:
+    client = DefensiveHttpClient(
+        timeout_seconds=1.0,
+        user_agent="test",
+        allow_insecure_http=True,
+        block_private_hosts=False,
+    )
+
+    client._validate_url("http://127.0.0.1/feed")
 
 
 def test_fixture_reads_are_size_bounded(tmp_path: Path) -> None:

@@ -1,0 +1,40 @@
+{"id": "HNDL-001", "text": "OpenSSL TLS RSA key exchange flaw allows decryption of recorded session traffic", "products": ["openssl"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-002", "text": "Diffie-Hellman key agreement weakness in an IPsec VPN gateway permits passive interception", "products": ["strongswan"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-003", "text": "APT campaign harvest-now-decrypt-later: recording IPsec VPN traffic for future decryption once a CRQC exists", "products": ["cisco-asa"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-004", "text": "ECDHE handshake downgrade in TLS 1.2 lets an attacker recover the shared secret from captured traffic", "products": ["nginx"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-005", "text": "OpenSSH key exchange vulnerability enables decryption of intercepted SSH sessions", "products": ["openssh"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-006", "text": "X25519 key encapsulation weakness in a messaging app allows store-now-decrypt-later attacks", "products": ["signal"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-007", "text": "RSA key transport in PKCS#1 v1.5 padding oracle exposes recorded HTTPS payloads to retrospective decryption", "products": ["apache-httpd"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-008", "text": "IKEv2 IPsec key exchange flaw; nation-state actor harvesting encrypted tunnels for Q-Day decryption", "products": ["libreswan"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-009", "text": "OpenPGP RSA encryption subkey weakness exposes stored encrypted email to future decryption", "products": ["gnupg"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-010", "text": "WolfSSL DHE key exchange flaw in a TLS stack permits recovery of session keys from recorded traffic", "products": ["wolfssl"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-011", "text": "GnuTLS RSA key transport handshake flaw enables passive decryption of captured connections", "products": ["gnutls"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-012", "text": "Curve25519 ECDH implementation bug in a VPN client leaks the negotiated key for harvest-now-decrypt-later", "products": ["wireguard"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-013", "text": "S/MIME RSA encryption flaw in an email gateway exposes archived ciphertext to retroactive decryption", "products": ["exchange"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-014", "text": "TLS key establishment weakness allows recording now decrypt later against a banking portal", "products": ["f5-bigip"], "hndl": 1, "vulnerable": 1}
+{"id": "HNDL-015", "text": "Finite field Diffie-Hellman group reuse in an SSL VPN permits decryption of stored captures once Shor's algorithm runs on a CRQC", "products": ["fortinet"], "hndl": 1, "vulnerable": 1}
+{"id": "SIG-001", "text": "ECDSA signature forgery in a code signing certificate allows malware to appear trusted", "products": ["windows"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-002", "text": "Authenticode code-signing bypass via ECDSA signature malleability in a driver loader", "products": ["windows"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-003", "text": "Ed25519 signature verification flaw lets an attacker forge software update manifests", "products": ["debian-apt"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-004", "text": "DSA nonce reuse in a firmware signing tool enables private key recovery and signature forgery", "products": ["uboot"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-005", "text": "X.509 certificate authority issues forgeable ECC-signed certificates due to weak elliptic curve parameters", "products": ["pki"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-006", "text": "JWT ES256 signature validation flaw permits authentication token forgery", "products": ["auth0"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-007", "text": "secp256r1 ECDSA implementation leaks the signing key through a timing side channel during signature generation", "products": ["openjdk"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-008", "text": "Public key infrastructure flaw: RS256 JWS signatures can be forged after key confusion in a token validator", "products": ["keycloak"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-009", "text": "Ed448 signature scheme misuse allows forged release artifacts in a package registry", "products": ["npm"], "hndl": 0, "vulnerable": 1}
+{"id": "SIG-010", "text": "ECDSA P-384 signing routine accepts malformed signatures, enabling forged firmware images", "products": ["dell-bios"], "hndl": 0, "vulnerable": 1}
+{"id": "NEG-001", "text": "Stored XSS in the comment field of a blog engine allows arbitrary script execution", "products": ["wordpress"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-002", "text": "Path traversal in a file upload handler permits reading arbitrary files outside the web root", "products": ["tomcat"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-003", "text": "SQL injection in a login form exposes the user database to extraction", "products": ["drupal"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-004", "text": "Stack-based buffer overflow in an image parser leads to remote code execution", "products": ["imagemagick"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-005", "text": "Insecure deserialization of untrusted input enables remote code execution in a Java service", "products": ["spring"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-006", "text": "Server-side request forgery in a webhook handler lets attackers reach internal metadata endpoints", "products": ["gitlab"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-007", "text": "Reflected cross-site scripting in a search parameter of a help desk portal", "products": ["zendesk"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-008", "text": "Heap overflow in a video decoder allows denial of service via a crafted media file", "products": ["ffmpeg"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-009", "text": "OS command injection in a router admin panel via the ping diagnostics field", "products": ["netgear"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-010", "text": "Privilege escalation via an unsafe symlink follow in a backup daemon", "products": ["linux"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-011", "text": "XML external entity injection in a document import feature discloses local files", "products": ["libreoffice"], "hndl": 0, "vulnerable": 0}
+{"id": "NEG-012", "text": "Open redirect in an OAuth callback parameter facilitates phishing", "products": ["okta"], "hndl": 0, "vulnerable": 0}
+{"id": "AWARE-001", "text": "Vendor announces post-quantum readiness plan aligned to CNSA 2.0 and ML-KEM", "products": ["aws"], "hndl": 0, "vulnerable": 0}
+{"id": "AWARE-002", "text": "Migration to ML-DSA and SLH-DSA per FIPS 204 and FIPS 205 begins across the product line", "products": ["microsoft"], "hndl": 0, "vulnerable": 0}
+{"id": "AWARE-003", "text": "Quantum-safe roadmap published; teams asked to inventory assets ahead of the NIST PQC transition", "products": ["google"], "hndl": 0, "vulnerable": 0}

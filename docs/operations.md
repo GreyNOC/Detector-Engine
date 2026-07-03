@@ -51,6 +51,7 @@ Core routes:
 - `GET /health`
 - `GET /sources`
 - `GET /threats`
+- `GET /threats/search`
 - `GET /threats/{threat_id}`
 - `GET /cves`
 - `GET /cves/{cve_id}`
@@ -76,6 +77,13 @@ Example run-history check:
 
 ```powershell
 curl "http://127.0.0.1:8000/ingest/runs?limit=25"
+```
+
+Example threat triage search:
+
+```powershell
+curl "http://127.0.0.1:8000/threats/search?query=edgegateway&min_probability=0.5"
+curl "http://127.0.0.1:8000/threats?cve=CVE-2026-12345&summary=true&sort=priority"
 ```
 
 Example score-history and export checks:

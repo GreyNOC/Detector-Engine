@@ -27,6 +27,8 @@ class EPSSClient:
             retries=settings.http_retries,
             max_response_bytes=settings.max_response_bytes,
             allowed_hosts=settings.allowed_fetch_hosts,
+            allow_insecure_http=settings.allow_insecure_http,
+            block_private_hosts=settings.block_private_fetch_hosts,
         )
 
     def load_records(self, *, fixture_path: Path | None = None) -> list[EPSSRecord]:
