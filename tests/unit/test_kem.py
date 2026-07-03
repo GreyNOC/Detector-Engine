@@ -3,7 +3,14 @@ from __future__ import annotations
 import base64
 
 import pytest
-from cryptography.exceptions import InvalidTag
+
+try:
+    from cryptography.exceptions import InvalidTag
+except ImportError:
+
+    class InvalidTag(Exception):
+        pass
+
 
 from greynoc_detector_engine.crypto.kem import (
     ALG_MLKEM,
