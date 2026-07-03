@@ -29,7 +29,7 @@ import base64
 import importlib.util
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -102,7 +102,8 @@ def _hkdf_sha256(ikm: bytes, *, info: bytes, length: int = _DERIVED_KEY_BYTES) -
         from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
         hkdf = HKDF(algorithm=hashes.SHA256(), length=length, salt=None, info=info)
-        return hkdf.derive(ikm)
+        derived: bytes = hkdf.derive(ikm)
+        return derived
     return _hkdf_sha256_stdlib(ikm, info=info, length=length)
 
 
@@ -379,7 +380,7 @@ def _require_aead() -> Callable[..., Any]:
         )
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    return AESGCM
+    return cast("Callable[..., Any]", AESGCM)
 
 
 def encrypt(payload: bytes, recipient_public_bundle: dict[str, Any]) -> KemEnvelope:
