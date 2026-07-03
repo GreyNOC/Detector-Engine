@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "greynoc-detector-engine"
-version = "1.0.1"
+version = "1.0.2"
 description = "Defensive threat-intelligence and detection-engine framework for GreyNOC."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,26 @@ dev = [
   "pytest-cov>=5.0.0",
   "ruff>=0.4.8",
 ]
+# Post-quantum / crypto-agility extras for hybrid artifact signing. Both are
+# OPTIONAL: with neither installed the engine still signs with a quantum-safe
+# HMAC-SHA256 baseline. `pq` adds classical Ed25519 (the hybrid half + agility);
+# `pq-mldsa` adds the NIST FIPS-204 ML-DSA post-quantum signature and needs a
+# liboqs build toolchain. Install both for full hybrid: pip install '.[pq,pq-mldsa]'.
+pq = [
+  "cryptography>=43.0.0",
+]
+pq-mldsa = [
+  "liboqs-python>=0.10.0",
+]
+# Pure-Python, FIPS-aligned ML-KEM / ML-DSA with NO C toolchain (kyber-py /
+# dilithium-py by Giacomo Pope). A liboqs-free way to exercise the lattice PQC
+# backends; reference-grade (not constant-time), so liboqs (`pq-mldsa`) remains
+# the preferred production backend. The always-on stdlib LMS/HSS signer needs
+# none of these.
+pq-pure = [
+  "kyber-py>=1.0",
+  "dilithium-py>=1.0",
+]
 
 [project.scripts]
 greynoc-detector = "greynoc_detector_engine.cli.main:app"
@@ -54,6 +74,11 @@ ignore = ["B008"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.ruff.lint.per-file-ignores]
+# This module is *about* confusable characters; its docstring intentionally
+# shows Cyrillic/Greek homoglyphs as examples.
+"src/greynoc_detector_engine/normalize/adversarial.py" = ["RUF002"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
@@ -61,12 +86,21 @@ pythonpath = ["src"]
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["greynoc_detector_engine"]
+files = ["src/greynoc_detector_engine"]
 strict = true
 warn_unused_ignores = true
 warn_return_any = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["apscheduler.*", "feedparser", "yaml"]
+module = [
+  "apscheduler.*",
+  "feedparser",
+  "yaml",
+  "cryptography.*",
+  "oqs",
+  "kyber_py.*",
+  "dilithium_py.*",
+  "quantcrypt.*",
+]
 ignore_missing_imports = true

@@ -1,5 +1,104 @@
 # Changelog
 
+## v1.0.2 - Post-quantum readiness + detection-quality harness
+
+Released 2026-07-03.
+
+Adds a post-quantum posture to the engine (both for its own artifacts and as a
+threat dimension it detects) and a measurable detection-quality layer ported
+from GreyNOC's GN-SLOP-DETECTION research engine. All additions are offline,
+dependency-light, and preserve the defensive-only safety boundary.
+
+### Post-quantum readiness — full PQC engine
+
+The engine is now **post-quantum ready out of the box**: `gn doctor crypto`
+reports PQ-ready with *no optional extras installed*, because public-key
+non-repudiation is provided in pure stdlib.
+
+Protecting the engine's own artifacts:
+
+- **Always-on post-quantum signing (`crypto/hbs.py`).** A pure-stdlib LMS/HSS
+  hash-based signature implementation (RFC 8554 / NIST SP 800-208), validated
+  against the RFC 8554 Test Case 1 known-answer vector. This is real
+  post-quantum non-repudiation with **no liboqs and no optional dependency**.
+  Stateful one-time keys; reuse is prevented and persisted by the keystore.
+- **Hybrid, crypto-agile signing (`crypto/signing.py`).** A detached,
+  multi-algorithm envelope: HMAC-SHA256 (stdlib integrity) + LMS/HSS (stdlib PQ)
+  + optional Ed25519 (`pq`) + optional FIPS-204 ML-DSA (`pq-mldsa`, liboqs).
+- **Managed keystore (`crypto/keystore.py`).** `gn crypto keygen/keys/rotate/sign`
+  — generation, rotation, retirement, and the safety-critical persistence of
+  stateful LMS state *before* a signature is released (no leaf reuse across a
+  crash or reload).
+- **Hybrid KEM encryption (`crypto/kem.py`).** `gn crypto encrypt/decrypt` —
+  ephemeral X25519 + ML-KEM-768 → HKDF → AES-256-GCM. Degrades to flagged
+  classical-only when no ML-KEM backend is present.
+- **Transparency log (`crypto/transparency.py`).** `gn crypto log` — an
+  append-only RFC 6962-style Merkle log of published artifacts with
+  post-quantum-signed checkpoints and inclusion proofs. Checkpoints are signed by
+  a persistent, **pinnable** keystore key (a stable well-known public key, à la a
+  Certificate-Transparency log), and `verify-checkpoint` **pins** that key so a
+  checkpoint forged with any other key is rejected — authenticity, not just
+  tamper-evidence. Pinning is exposed generally via
+  `HybridSigner.verify(..., expected_public_keys=...)`: an asymmetric signature
+  carries its own public key, so without a pin it proves only internal
+  consistency; pinning the trusted key makes verification fail closed on a
+  substituted signing key.
+- **Self-test (`crypto/selftest.py`).** `gn crypto selftest` runs known-answer /
+  round-trip tests for every available backend.
+- **Algorithm registry (`crypto/algorithms.py`).** One authoritative source of
+  algorithm facts — NIST category, byte sizes, governing standard, CNSA-2.0 /
+  NIST IR 8547 deprecation dates — used everywhere. `gn crypto algorithms`.
+- **Crypto-agile hashing.** `utils/hashing` is algorithm-selectable
+  (SHA-256/SHA-3/BLAKE2), refuses MD5/SHA-1, and exposes quantum-resistance.
+
+Detecting threats to *other* systems' cryptography:
+
+- **Quantum-risk classifier** (`analysis/quantum_risk.py`, `gn quantum scan`) —
+  flags quantum-vulnerable crypto and harvest-now-decrypt-later risk, attaching
+  an explainable `QuantumRiskAssessment` to threats, with an offline eval
+  harness (`eval/quantum`, `gn quantum eval`).
+- **Crypto inventory + Mosca** (`analysis/crypto_inventory.py`,
+  `analysis/mosca.py`, `gn quantum inventory` / `mosca`) — posture summary per
+  asset and Mosca's-inequality harvest-now-decrypt-later analysis.
+- **CBOM** (`analysis/cbom.py`, `gn crypto cbom`) — CycloneDX 1.6 Cryptographic
+  Bill of Materials emit/parse/assess.
+- **TLS / X.509 posture** (`analysis/tls_posture.py`, `gn quantum cert`) —
+  offline certificate quantum-exposure classification; optional active probe is
+  off by default and SSRF-guarded.
+- **Migration planner** (`analysis/pqc_migration.py`, `gn quantum plan` /
+  `timeline`) — prioritized CNSA-2.0 / NIST IR 8547 migration plan.
+
+Surface:
+
+- **CLI:** new `gn crypto` app and an expanded `gn quantum` app.
+- **API:** new read-only `/crypto/*` and `/quantum/*` routes.
+- **Extras:** `pq` (Ed25519/X25519), `pq-mldsa` (liboqs ML-DSA/ML-KEM),
+  `pq-pure` (pure-Python ML-KEM/ML-DSA, no C toolchain).
+- See `docs/post_quantum_readiness.md` and `docs/standards_reference.md`.
+
+### Detection quality
+
+- **Offline forecast-evaluation harness** (`greynoc_detector_engine.eval`,
+  `gn eval`). Scores `AttackForecast` probabilities against realized outcomes
+  with the metrics the literature uses — ROC-AUC, TPR at a fixed low FPR, F1,
+  ECE/Brier — plus Platt calibration and glass-box learned `predictive_fusion_weights`.
+  Pure-Python, never on the request path. See `docs/detection_quality.md`.
+- **Adversarial-evasion resistance.** OSINT ingest now strips zero-width / bidi
+  controls and folds homoglyphs before entity extraction, so a CVE id, product,
+  or actor name hidden behind lookalike characters still matches; the evasion is
+  also surfaced as a finding.
+
+### Quality
+
+- New unit/integration tests across the PQC layer — LMS/HSS (incl. the RFC 8554
+  KAT), hybrid KEM, keystore (incl. no-leaf-reuse-across-reload), transparency
+  log, crypto self-test, crypto inventory, CBOM, migration planner, TLS posture,
+  the quantum eval harness, and end-to-end CLI + API integration tests — plus the
+  pre-existing eval harness, evasion normalization, hybrid signing, hashing
+  agility, and quantum-risk classifier tests. Verification at release: 361
+  tests pass, 2 tests skip optional backends, ruff passes, ruff format passes,
+  and strict mypy passes.
+
 ## v1.0.1 - Security hardening patch
 
 This patch release keeps the v1.0 operator workflow intact and tightens the

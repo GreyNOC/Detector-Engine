@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from greynoc_detector_engine import __version__
 from greynoc_detector_engine.api.routes import (
+    crypto,
     cves,
     detections,
     exports,
@@ -18,6 +19,7 @@ from greynoc_detector_engine.api.routes import (
     network,
     operations,
     predictions,
+    quantum,
     scores,
     sources,
     testing,
@@ -61,6 +63,8 @@ def create_app() -> FastAPI:
     app.include_router(network.router)
     app.include_router(learning.router)
     app.include_router(jobs.router)
+    app.include_router(quantum.router)
+    app.include_router(crypto.router)
     return app
 
 

@@ -33,7 +33,29 @@ class Settings(BaseSettings):
     http_retries: int = Field(default=2, ge=0, le=5)
     max_response_bytes: int = Field(default=5_000_000, ge=1024)
     allowed_fetch_hosts: list[str] = Field(default_factory=list)
+    allow_insecure_http: bool = False
+    block_private_fetch_hosts: bool = True
     user_agent: str = "greynoc-detector-engine/0.1 defensive-research"
+    # Shared secret for HMAC-SHA256 artifact signing (detections/STIX exports).
+    # Quantum-resistant integrity baseline; public-key PQ signing uses the 'pq' extra.
+    signing_hmac_key: SecretStr | None = None
+    # On-disk keystore for managed signing keys (incl. stateful LMS/HSS state) and
+    # the append-only, PQ-signed transparency log of published artifacts.
+    keystore_path: Path = Path("data/keystore/greynoc_keystore.json")
+    transparency_log_path: Path = Path("data/transparency/artifact_log.jsonl")
+    # Managed keystore key that signs transparency-log checkpoints. Using one
+    # persistent, pinnable key (rather than a throwaway key per checkpoint) gives
+    # the log a stable well-known public key that verifiers pin to reject forged
+    # signed tree heads (RFC 6962-style authenticity).
+    transparency_log_key_id: str = "transparency-log"
+    # Preferred public-key signing backend for new keys: "lms" (stdlib, always
+    # available, post-quantum), "ml-dsa" (liboqs), or "ed25519" (classical).
+    signing_algorithm: str = "lms"
+    # Mosca-inequality planning defaults (years). crqc_estimate ~ Z; the engine's
+    # own data shelf-life ~ X; an enterprise migration ~ Y. Override per scan.
+    crqc_estimate_years: float = Field(default=10.0, ge=0)
+    default_data_shelf_life_years: float = Field(default=10.0, ge=0)
+    default_migration_years: float = Field(default=5.0, ge=0)
 
 
 @lru_cache

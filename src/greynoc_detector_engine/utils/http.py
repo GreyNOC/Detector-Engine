@@ -10,6 +10,9 @@ Constraints (do not relax without updating docs/security_review.md):
   * Host allowlist. When ``allowed_hosts`` is non-empty, only those hosts
     can be fetched. Public engine builds leave this empty; private builds
     can lock it down.
+  * HTTPS by default. Cleartext HTTP requires explicit opt-in.
+  * Local/private IP literal block by default. Loopback, private,
+    link-local, multicast, reserved, and unspecified IP literals are refused.
   * Content-type sanity. JSON fetches that come back as something else are
     rejected.
   * Retries with exponential backoff for transient failures.
@@ -20,6 +23,7 @@ Constraints (do not relax without updating docs/security_review.md):
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import time
 from collections.abc import Iterable
@@ -30,6 +34,8 @@ import httpx
 
 DEFAULT_MAX_BYTES: int = 5_000_000
 MAX_REDIRECTS: int = 5
+DEFAULT_ALLOW_INSECURE_HTTP: bool = False
+DEFAULT_BLOCK_PRIVATE_HOSTS: bool = True
 
 
 class HttpFetchError(RuntimeError):
@@ -50,13 +56,19 @@ class DefensiveHttpClient:
         max_response_bytes: int = DEFAULT_MAX_BYTES,
         max_redirects: int = MAX_REDIRECTS,
         allowed_hosts: Iterable[str] | None = None,
+        allow_insecure_http: bool = DEFAULT_ALLOW_INSECURE_HTTP,
+        block_private_hosts: bool = DEFAULT_BLOCK_PRIVATE_HOSTS,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.user_agent = user_agent
         self.retries = max(0, retries)
         self.max_response_bytes = max_response_bytes
         self.max_redirects = max_redirects
-        self.allowed_hosts: set[str] = {host.lower() for host in allowed_hosts or []}
+        self.allowed_hosts: set[str] = {
+            self._normalize_hostname(host) for host in allowed_hosts or []
+        }
+        self.allow_insecure_http = allow_insecure_http
+        self.block_private_hosts = block_private_hosts
 
     # -- public ---------------------------------------------------------------
 
@@ -154,10 +166,15 @@ class DefensiveHttpClient:
         parsed = urlparse(url)
         if parsed.scheme not in {"https", "http"}:
             raise HttpFetchError(f"unsupported URL scheme for {url}")
+        if parsed.scheme == "http" and not self.allow_insecure_http:
+            raise HttpFetchError(f"insecure HTTP fetch refused for {url}")
         if not parsed.hostname:
             raise HttpFetchError(f"URL has no hostname: {url}")
-        if self.allowed_hosts and parsed.hostname.lower() not in self.allowed_hosts:
+        hostname = self._normalize_hostname(parsed.hostname)
+        if self.allowed_hosts and hostname not in self.allowed_hosts:
             raise HttpFetchError(f"host is not in allowed_fetch_hosts: {parsed.hostname}")
+        if self.block_private_hosts and self._is_private_or_local_host(hostname):
+            raise HttpFetchError(f"private or local fetch host refused: {parsed.hostname}")
 
     def _validate_content_length(self, url: str, response: httpx.Response) -> None:
         content_length = response.headers.get("content-length")
@@ -172,3 +189,29 @@ class DefensiveHttpClient:
                 f"response too large from {url}: declared {declared} bytes "
                 f"(cap {self.max_response_bytes})"
             )
+
+    @staticmethod
+    def _normalize_hostname(hostname: str) -> str:
+        return hostname.strip().rstrip(".").lower()
+
+    @staticmethod
+    def _is_private_or_local_host(hostname: str) -> bool:
+        if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".localhost"):
+            return True
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            labels = [label for label in hostname.split(".") if label]
+            return bool(labels) and all(
+                label.isdigit() or label.startswith("0x") for label in labels
+            )
+        return any(
+            (
+                address.is_loopback,
+                address.is_private,
+                address.is_link_local,
+                address.is_multicast,
+                address.is_reserved,
+                address.is_unspecified,
+            )
+        )

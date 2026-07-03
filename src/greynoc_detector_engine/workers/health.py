@@ -21,7 +21,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from greynoc_detector_engine.spacestation.honeypot import HoneypotConfig
 from greynoc_detector_engine.storage.sqlite import SQLiteStorage
-from greynoc_detector_engine.utils.http import DEFAULT_MAX_BYTES, MAX_REDIRECTS
+from greynoc_detector_engine.utils.http import (
+    DEFAULT_ALLOW_INSECURE_HTTP,
+    DEFAULT_BLOCK_PRIVATE_HOSTS,
+    DEFAULT_MAX_BYTES,
+    MAX_REDIRECTS,
+)
 
 
 class HealthFinding(BaseModel):
@@ -78,7 +83,46 @@ def run_safety_self_check() -> DoctorReport:
         report.add("http.redirect_cap", "ok", f"{MAX_REDIRECTS} hops")
     else:
         report.add("http.redirect_cap", "fail", f"unreasonable cap {MAX_REDIRECTS}")
+    if not DEFAULT_ALLOW_INSECURE_HTTP:
+        report.add("http.https_default", "ok", "plain HTTP fetches require explicit opt-in.")
+    else:
+        report.add("http.https_default", "fail", "plain HTTP fetches are enabled by default")
+    if DEFAULT_BLOCK_PRIVATE_HOSTS:
+        report.add(
+            "http.private_host_block",
+            "ok",
+            "private, loopback, link-local, multicast, and reserved IP literals are blocked.",
+        )
+    else:
+        report.add("http.private_host_block", "fail", "private fetch hosts are allowed by default")
 
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Post-quantum crypto posture
+# ---------------------------------------------------------------------------
+
+
+def run_crypto_posture_check() -> DoctorReport:
+    """Report the engine's post-quantum cryptographic posture.
+
+    Kept separate from :func:`run_safety_self_check` because a missing optional
+    PQ backend is a ``warn`` (a posture gap), not a ``fail`` (a broken default).
+    """
+    from greynoc_detector_engine.crypto.posture import crypto_posture
+
+    report = DoctorReport()
+    posture = crypto_posture()
+    for name, severity, detail in posture.findings:
+        report.add(name, severity, detail)
+    summary = "post-quantum ready" if posture.ready else "post-quantum migration incomplete"
+    report.add("crypto.summary", "ok" if posture.ready else "warn", summary)
+    # The exit code tracks actual PQ readiness (integrity + PQ non-repudiation),
+    # NOT the presence of every optional backend. A missing liboqs ML-DSA or an
+    # older OpenSSL is a posture *gap* surfaced as a "warn" finding, not a failure
+    # that should fence a deployment -- the stdlib LMS path keeps the engine ready.
+    report.exit_code = 0 if posture.ready else 2
     return report
 
 

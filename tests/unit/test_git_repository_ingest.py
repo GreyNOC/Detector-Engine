@@ -96,6 +96,8 @@ def test_git_cloner_is_allowed_helper() -> None:
     assert cloner.is_allowed("https://github.com/SigmaHQ/sigma.git")
     assert cloner.is_allowed("https://github.com/sigmahq/sigma")  # case-insensitive
     assert not cloner.is_allowed("https://github.com/sigmahq/other")
+    assert not cloner.is_allowed("https://github.com/sigmahq/sigma-evil")
+    assert not cloner.is_allowed("https://github.com/sigmahq/sigma/../other")
     assert not cloner.is_allowed("http://github.com/SigmaHQ/sigma.git")
 
 

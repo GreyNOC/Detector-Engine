@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from greynoc_detector_engine.analysis.quantum_risk import QuantumRiskClassifier
 from greynoc_detector_engine.models.cve import CVERecord
 from greynoc_detector_engine.models.indicator import Indicator, IndicatorType
 from greynoc_detector_engine.models.kev import KEVRecord
+from greynoc_detector_engine.models.quantum import QuantumRiskLevel
 from greynoc_detector_engine.models.source import SourceConfig, SourceItem, SourceReference
 from greynoc_detector_engine.models.threat import ThreatRecord, ThreatSeverity
+from greynoc_detector_engine.normalize.adversarial import (
+    normalize_adversarial,
+    scan_evasion,
+)
 from greynoc_detector_engine.normalize.ai_attack_classifier import AIAttackClassifier
 from greynoc_detector_engine.normalize.entity_extractor import EntityExtractor
 from greynoc_detector_engine.utils.hashing import stable_hash
@@ -26,13 +32,22 @@ class SourceItemNormalizer:
         published_at: datetime | None = None,
         metadata: dict[str, object] | None = None,
     ) -> SourceItem:
-        normalized_content = normalize_whitespace(content)
-        content_basis = f"{source.source_id}|{url or ''}|{title}|{normalized_content}"
+        # Defeat character-level evasion (zero-width splices, homoglyphs, bidi
+        # controls) BEFORE whitespace normalization and entity extraction, so a
+        # CVE id, product, or actor name hidden behind lookalike characters
+        # still matches downstream. The scan is also recorded as a finding.
+        evasion = scan_evasion(f"{title}\n{content}")
+        normalized_title = normalize_whitespace(normalize_adversarial(title))
+        normalized_content = normalize_whitespace(normalize_adversarial(content))
+        content_basis = f"{source.source_id}|{url or ''}|{normalized_title}|{normalized_content}"
         content_hash = stable_hash(content_basis, 32)
+        item_metadata = dict(metadata or {})
+        if evasion.total > 0:
+            item_metadata["evasion"] = evasion.as_dict()
         return SourceItem(
             item_id=f"src-{stable_hash(content_hash)}",
             source_id=source.source_id,
-            title=normalize_whitespace(title),
+            title=normalized_title,
             url=url or source.url,
             author=author,
             published_at=published_at,
@@ -41,7 +56,7 @@ class SourceItemNormalizer:
             raw_excerpt=make_excerpt(normalized_content, max_chars=1000),
             content_hash=content_hash,
             confidence=0.8 if source.reliability in {"high", "verified"} else 0.55,
-            metadata=metadata or {},
+            metadata=item_metadata,
         )
 
 
@@ -49,6 +64,7 @@ class ThreatNormalizer:
     def __init__(self) -> None:
         self.extractor = EntityExtractor()
         self.ai_classifier = AIAttackClassifier()
+        self.quantum_classifier = QuantumRiskClassifier()
 
     def from_cve(self, cve: CVERecord, kev: KEVRecord | None = None) -> ThreatRecord:
         severity = self._severity_from_cvss(cve.cvss_score)
@@ -58,6 +74,7 @@ class ThreatNormalizer:
             references.extend(kev.source_references)
             related_kev_entries.append(kev.cve_id)
 
+        quantum_risk = self.quantum_classifier.assess(cve.description, cve.affected_products)
         return ThreatRecord(
             threat_id=f"thr-cve-{cve.cve_id.lower()}",
             title=f"{cve.cve_id}: {self._short_title(cve.description)}",
@@ -80,6 +97,9 @@ class ThreatNormalizer:
                 "Correlate vulnerable product inventory with external exposure.",
                 "Monitor endpoint and network logs for exploitation attempts.",
             ],
+            quantum_risk=(
+                quantum_risk if quantum_risk.risk_level != QuantumRiskLevel.NONE else None
+            ),
             changelog=["Created from normalized CVE data."],
         )
 
@@ -87,6 +107,7 @@ class ThreatNormalizer:
         text = f"{item.title} {item.raw_content}"
         entities = self.extractor.extract(text)
         ai_classification = self.ai_classifier.classify(text)
+        quantum_risk = self.quantum_classifier.assess(text, entities.products)
         indicators = [
             Indicator(value=cve_id, type=IndicatorType.CVE, confidence=0.9, source=item.source_id)
             for cve_id in entities.cve_ids
@@ -100,6 +121,18 @@ class ThreatNormalizer:
             )
             for term in entities.ai_terms
         )
+        detection_opportunities = [
+            "Create targeted hunt queries once concrete telemetry fields are known."
+        ]
+        changelog = ["Created from normalized source signal."]
+        evasion = item.metadata.get("evasion") if isinstance(item.metadata, dict) else None
+        if isinstance(evasion, dict) and evasion.get("is_evasive"):
+            detection_opportunities.append(
+                "Source text contained deliberate character-level obfuscation "
+                "(zero-width/bidi/homoglyph); treat provenance with suspicion and "
+                "alert on feeds that inject invisible or mixed-script characters."
+            )
+            changelog.append("Adversarial character-level evasion detected and normalized.")
         return ThreatRecord(
             threat_id=f"thr-src-{stable_hash(item.content_hash)}",
             title=item.title,
@@ -118,10 +151,11 @@ class ThreatNormalizer:
                 "Validate the signal against trusted sources before escalation.",
                 "Track related CVEs, product mentions, and detection-rule references.",
             ],
-            detection_opportunities=[
-                "Create targeted hunt queries once concrete telemetry fields are known."
-            ],
-            changelog=["Created from normalized source signal."],
+            quantum_risk=(
+                quantum_risk if quantum_risk.risk_level != QuantumRiskLevel.NONE else None
+            ),
+            detection_opportunities=detection_opportunities,
+            changelog=changelog,
         )
 
     @staticmethod
