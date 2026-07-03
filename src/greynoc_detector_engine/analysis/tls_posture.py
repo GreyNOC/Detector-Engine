@@ -307,6 +307,7 @@ def probe_tls_posture(
     target_ip = _resolve_public_address(host, port)
 
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     der_cert: bytes
     negotiated: str | None
     with (

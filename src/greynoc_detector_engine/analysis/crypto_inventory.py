@@ -95,13 +95,27 @@ _DIRECT: dict[str, str] = {
     "dilithium5": "ML-DSA-87",
 }
 
+
 # RSA with an explicit modulus size -> the closest registered RSA record.
-_RSA_SIZE_RE = re.compile(r"rsa[^0-9]*([0-9]{3,5})")
-
-
 def _collapse(raw: str) -> str:
     """Lowercase and strip all non-alphanumerics for direct-table lookup."""
     return re.sub(r"[^a-z0-9]+", "", raw.casefold())
+
+
+def _extract_rsa_bits(raw: str) -> int | None:
+    marker_at = raw.find("rsa")
+    if marker_at < 0:
+        return None
+    idx = marker_at + len("rsa")
+    while idx < len(raw) and not raw[idx].isdigit():
+        idx += 1
+    digits: list[str] = []
+    while idx < len(raw) and raw[idx].isdigit() and len(digits) < 5:
+        digits.append(raw[idx])
+        idx += 1
+    if len(digits) < 3:
+        return None
+    return int("".join(digits))
 
 
 def _rsa_record_for_bits(bits: int) -> str:
@@ -135,9 +149,9 @@ def normalize_algorithm(raw: str) -> str | None:
             return suite
 
     # 2. RSA with an explicit modulus size.
-    rsa_match = _RSA_SIZE_RE.search(lowered)
-    if rsa_match:
-        rsa_name = _rsa_record_for_bits(int(rsa_match.group(1)))
+    rsa_bits = _extract_rsa_bits(lowered)
+    if rsa_bits is not None:
+        rsa_name = _rsa_record_for_bits(rsa_bits)
         if is_kex:
             # Only RSA-2048 has a dedicated key-establishment record.
             return "RSA-2048-KEX"
