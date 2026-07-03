@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from greynoc_detector_engine.cli.main import app
 from greynoc_detector_engine.config.settings import get_settings
+from greynoc_detector_engine.crypto.kem import kem_available
 
 runner = CliRunner()
 
@@ -72,6 +73,10 @@ def test_keystore_sign_verify_and_no_leaf_reuse(pqc_env: Path) -> None:
     assert _lms(first_env) != _lms(second_env)
 
 
+@pytest.mark.skipif(
+    not kem_available(),
+    reason="cryptography (X25519 + AES-256-GCM) not installed",
+)
 def test_kem_encrypt_decrypt_round_trip(pqc_env: Path) -> None:
     plaintext = pqc_env / "secret.bin"
     plaintext.write_bytes(b"top-secret threat intelligence bundle")

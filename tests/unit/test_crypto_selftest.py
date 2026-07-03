@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from greynoc_detector_engine.crypto import mldsa_available
+from greynoc_detector_engine.crypto.kem import kem_available
 from greynoc_detector_engine.crypto.selftest import (
     SelfTestReport,
     SelfTestResult,
@@ -16,7 +17,8 @@ def _by_name(report: SelfTestReport) -> dict[str, SelfTestResult]:
 
 def test_report_is_ok_in_this_environment() -> None:
     report = run_crypto_selftest()
-    # cryptography present, oqs absent: nothing should actually fail.
+    # Optional crypto backends may be absent, but absence is reported as skip,
+    # not failure.
     assert report.failed == 0
     assert report.ok is True
 
@@ -31,11 +33,12 @@ def test_counts_are_self_consistent() -> None:
 
 def test_core_checks_pass() -> None:
     results = _by_name(run_crypto_selftest())
-    # The always-available core: hashing, HMAC, LMS, and the (cryptography-backed) KEM.
+    # The always-available core: hashing, HMAC, and pure-stdlib LMS.
     assert results["hash.agility"].status == "pass"
     assert results["signing.hmac"].status == "pass"
     assert results["signing.lms"].status == "pass"
-    assert results["kem.roundtrip"].status == "pass"
+    expected_kem_status = "pass" if kem_available() else "skip"
+    assert results["kem.roundtrip"].status == expected_kem_status
 
 
 def test_there_is_a_passing_lms_check() -> None:
